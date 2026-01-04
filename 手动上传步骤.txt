@@ -1,0 +1,137 @@
+========================================
+GitHub 手动上传步骤（避免乱码）
+========================================
+
+方法一：使用命令行
+------------------
+
+1. 打开命令提示符（cmd）
+   - 按 Win + R
+   - 输入 cmd 回车
+
+2. 进入项目目录
+   cd D:\mpower_project\video_pin
+
+3. 初始化 Git
+   git init
+
+4. 添加远程仓库（替换成你的仓库地址）
+   git remote add origin https://github.com/你的用户名/video_pin.git
+
+5. 添加所有文件
+   git add .
+
+6. 创建提交
+   git commit -m "Initial commit"
+
+7. 推送到 GitHub
+   git branch -M main
+   git push -u origin main
+
+
+方法二：使用 GitHub 网页
+----------------------
+
+1. 创建仓库
+   - 访问 https://github.com/new
+   - 输入仓库名称：video_pin
+   - 点击 Create repository
+
+2. 上传文件
+   - 在仓库页面点击 "uploading an existing file"
+   - 将以下文件拖拽到页面：
+     * main.py
+     * video_processor.py
+     * utils.py
+     * README.md
+     * .gitignore
+
+3. 上传 GitHub Actions 配置
+   - 点击 "Add file" -> "Create new file"
+   - 文件名输入：.github/workflows/build.yml
+   - 复制 build.yml 的内容粘贴进去
+   - 点击 "Commit new file"
+
+
+方法三：使用 GitHub Desktop
+-------------------------
+
+1. 下载安装
+   https://desktop.github.com/
+
+2. 登录 GitHub 账号
+
+3. 添加本地仓库
+   File -> Add Local Repository
+   选择：D:\mpower_project\video_pin
+
+4. 发布仓库
+   点击 "Publish repository"
+   输入仓库名称：video_pin
+   点击 "Publish repository"
+
+
+触发自动构建
+-----------
+
+1. 访问仓库页面
+   https://github.com/你的用户名/video_pin
+
+2. 点击 "Actions" 标签
+
+3. 左侧选择 "Build and Release"
+
+4. 右侧点击 "Run workflow"
+
+5. 点击绿色的 "Run workflow" 按钮
+
+6. 等待 5-10 分钟
+
+7. 构建完成后：
+   - 点击构建任务
+   - 滚动到底部找到 "Artifacts"
+   - 下载 windows-build 和 macos-build
+
+
+创建正式发布
+-----------
+
+如果想在 Releases 页面显示：
+
+1. 打开命令提示符
+   cd D:\mpower_project\video_pin
+
+2. 创建标签
+   git tag v1.0.0
+
+3. 推送标签
+   git push origin v1.0.0
+
+4. GitHub Actions 会自动：
+   - 构建 Windows 和 macOS 版本
+   - 创建 Release
+   - 上传安装包
+
+
+常见问题
+-------
+
+Q: 找不到 Actions 标签？
+A: 需要先上传 .github/workflows/build.yml 文件
+
+Q: 构建失败？
+A: 点击构建任务查看详细日志
+
+Q: 如何更新代码？
+A: 修改后运行：
+   git add .
+   git commit -m "更新说明"
+   git push
+
+
+需要帮助？
+---------
+
+查看详细文档：
+- QUICK_START.md
+- GITHUB_ACTIONS_GUIDE.md
