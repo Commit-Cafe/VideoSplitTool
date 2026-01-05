@@ -251,6 +251,52 @@ def format_duration(seconds: float) -> str:
         return f"{minutes:02d}:{secs:02d}"
 
 
+def get_video_orientation(width: int, height: int) -> str:
+    """
+    根据视频宽高判断方向
+
+    Args:
+        width: 视频宽度
+        height: 视频高度
+
+    Returns:
+        方向描述字符串: "横屏"、"竖屏"、"正方形" 或 "未知"
+    """
+    if width <= 0 or height <= 0:
+        return "未知"
+
+    if width > height:
+        return "横屏"
+    elif height > width:
+        return "竖屏"
+    else:
+        return "正方形"
+
+
+def format_video_info(width: int, height: int, duration: float = None) -> str:
+    """
+    格式化视频信息显示字符串
+
+    Args:
+        width: 视频宽度
+        height: 视频高度
+        duration: 视频时长（可选）
+
+    Returns:
+        格式化的视频信息字符串
+    """
+    if width <= 0 or height <= 0:
+        return "无法获取视频信息"
+
+    orientation = get_video_orientation(width, height)
+    info_str = f"{width}x{height} ({orientation})"
+
+    if duration is not None and duration > 0:
+        info_str += f", 时长: {format_duration(duration)}"
+
+    return info_str
+
+
 def is_valid_video(file_path: str) -> bool:
     """检查是否是有效的视频文件"""
     valid_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}

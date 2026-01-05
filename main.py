@@ -10,7 +10,7 @@ import threading
 import atexit
 from datetime import datetime
 from PIL import Image, ImageTk
-from utils import check_ffmpeg, extract_frame, get_temp_dir, is_valid_video, get_video_info, format_duration
+from utils import check_ffmpeg, extract_frame, get_temp_dir, is_valid_video, get_video_info, format_duration, format_video_info
 from video_processor import VideoProcessor, ProcessResult
 from temp_manager import global_temp_manager, cleanup_on_exit
 from logger import logger, cleanup_old_logs
@@ -26,7 +26,7 @@ class VideoItem:
         self.cover_type = "none"        # 封面类型: none/frame/image
         self.cover_frame_time = 0.0     # 封面帧时间点(秒)
         self.cover_image_path = None    # 外部封面图片路径
-        self.cover_duration = 3.0       # 封面显示时长(秒)
+        self.cover_duration = 1.0       # 封面显示时长(秒)
         self.cover_frame_source = "template"  # 封面帧来源: template/list
 
     def get_summary(self):
@@ -51,8 +51,8 @@ class VideoSettingsDialog:
         # 创建对话框
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"视频设置 - {video_item.name}")
-        self.dialog.geometry("520x750")
-        self.dialog.minsize(480, 700)
+        self.dialog.geometry("520x800")
+        self.dialog.minsize(480, 750)
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -88,6 +88,19 @@ class VideoSettingsDialog:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # ============ 按钮区域（先创建，pack到底部，确保始终可见）============
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+
+        btn_inner = ttk.Frame(btn_frame)
+        btn_inner.pack(anchor=tk.CENTER)
+
+        ttk.Button(btn_inner, text="确定", command=self._on_ok, width=10).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_inner, text="取消", command=self._on_cancel, width=10).pack(side=tk.LEFT, padx=10)
+
+        # 分隔线
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+
         # ============ 分割设置 ============
         split_mode_text = "左右分割" if self.split_mode == "horizontal" else "上下分割"
         split_frame = ttk.LabelFrame(main_frame, text=f"分割设置（当前: {split_mode_text}）", padding="5")
@@ -99,6 +112,10 @@ class VideoSettingsDialog:
         else:
             mode_hint = "拖拽红线调整上下分割位置 (C=上, D=下)"
         ttk.Label(split_frame, text=mode_hint, foreground='gray').pack(anchor=tk.W, padx=3)
+
+        # 视频信息显示
+        self.video_info_var = tk.StringVar(value="正在加载视频信息...")
+        ttk.Label(split_frame, textvariable=self.video_info_var, foreground='#0066cc').pack(anchor=tk.W, padx=3, pady=(2,5))
 
         # 预览画布
         self.preview_canvas = tk.Canvas(split_frame, width=self.canvas_width, height=self.canvas_height,
@@ -172,7 +189,7 @@ class VideoSettingsDialog:
         preview_row = ttk.Frame(self.frame_settings)
         preview_row.pack(fill=tk.X, pady=5)
         ttk.Label(preview_row, text="预览:").pack(side=tk.LEFT, anchor=tk.N)
-        self.cover_preview_canvas = tk.Canvas(preview_row, width=160, height=90,
+        self.cover_preview_canvas = tk.Canvas(preview_row, width=240, height=135,
                                                bg='#333333', highlightthickness=1)
         self.cover_preview_canvas.pack(side=tk.LEFT, padx=5)
         self.cover_preview_photo = None  # 保持引用防止被回收
@@ -206,17 +223,6 @@ class VideoSettingsDialog:
         # 初始化封面设置状态
         self._on_cover_type_change()
 
-        # ============ 按钮 ============
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=15)
-
-        # 使用内部frame居中按钮
-        btn_inner = ttk.Frame(btn_frame)
-        btn_inner.pack(anchor=tk.CENTER)
-
-        ttk.Button(btn_inner, text="确定", command=self._on_ok, width=10).pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_inner, text="取消", command=self._on_cancel, width=10).pack(side=tk.LEFT, padx=10)
-
     def _load_video_preview(self):
         """加载视频预览"""
         temp_dir = get_temp_dir()
@@ -229,11 +235,21 @@ class VideoSettingsDialog:
         else:
             source_video = self.video_item.path
 
-        # 获取视频信息
-        info = get_video_info(source_video)
-        if info:
-            self.video_duration = info.get('duration', 0)
+        # 获取封面来源视频的信息（用于时间滑块）
+        source_info = get_video_info(source_video)
+        if source_info:
+            self.video_duration = source_info.get('duration', 0)
             self.time_scale.configure(to=max(1, self.video_duration))
+
+        # 获取并显示当前列表视频的尺寸信息（始终显示列表视频的信息，而非source_video）
+        list_video_info = get_video_info(self.video_item.path)
+        if list_video_info:
+            width = list_video_info.get('width', 0)
+            height = list_video_info.get('height', 0)
+            duration = list_video_info.get('duration', 0)
+            self.video_info_var.set(f"视频尺寸: {format_video_info(width, height, duration)}")
+        else:
+            self.video_info_var.set("无法获取视频信息")
 
         if extract_frame(self.video_item.path, preview_path):
             try:
@@ -329,6 +345,14 @@ class VideoSettingsDialog:
         source = self.cover_frame_source.get()
         if source == "template" and self.template_video:
             video_path = self.template_video
+        elif source == "merged":
+            # 拼接后视频：先生成预览
+            video_path = self._generate_merged_preview()
+            if not video_path:
+                logger.warning("无法生成拼接预览，使用列表视频")
+                video_path = self.video_item.path
+        elif source == "list":
+            video_path = self.video_item.path
         else:
             video_path = self.video_item.path
 
@@ -385,13 +409,13 @@ class VideoSettingsDialog:
             try:
                 img = Image.open(preview_path)
                 # 缩放到预览尺寸
-                img.thumbnail((160, 90), Image.Resampling.LANCZOS)
+                img.thumbnail((240, 135), Image.Resampling.LANCZOS)
                 self.cover_preview_photo = ImageTk.PhotoImage(img)
 
                 # 更新画布
                 self.cover_preview_canvas.delete("all")
-                x = (160 - img.width) // 2
-                y = (90 - img.height) // 2
+                x = (240 - img.width) // 2
+                y = (135 - img.height) // 2
                 self.cover_preview_canvas.create_image(x, y, anchor=tk.NW, image=self.cover_preview_photo)
             except Exception as e:
                 self._show_cover_preview_error("加载失败")
@@ -401,11 +425,12 @@ class VideoSettingsDialog:
     def _show_cover_preview_error(self, msg):
         """显示封面预览错误"""
         self.cover_preview_canvas.delete("all")
-        self.cover_preview_canvas.create_text(80, 45, text=msg, fill='#888888', font=('Arial', 9))
+        self.cover_preview_canvas.create_text(120, 67, text=msg, fill='#888888', font=('Arial', 10))
 
     def _generate_merged_preview(self):
         """生成拼接后视频的快速预览（用于封面帧选择）"""
         if not self.template_video or not self.parent_app:
+            logger.warning("无法生成拼接预览：缺少模板视频或主窗口引用")
             return None
 
         try:
@@ -417,6 +442,7 @@ class VideoSettingsDialog:
 
             # 检查缓存（避免重复生成）
             if hasattr(self, '_cached_merged_preview') and os.path.exists(self._cached_merged_preview):
+                logger.debug(f"使用缓存的拼接预览: {self._cached_merged_preview}")
                 return self._cached_merged_preview
 
             # 显示提示信息
@@ -426,8 +452,10 @@ class VideoSettingsDialog:
             # 获取主窗口的拼接组合（使用第一个有效组合）
             combinations = self.parent_app._get_merge_combinations()
             if not combinations:
+                logger.warning("无法获取拼接组合")
                 return None
             merge_mode = combinations[0]  # 使用第一个组合
+            logger.debug(f"生成拼接预览，merge_mode={merge_mode}")
 
             # 构建快速拼接命令（只拼接前15秒，使用最快参数）
             ffmpeg = get_ffmpeg_path()
@@ -520,17 +548,22 @@ class VideoSettingsDialog:
             ]
 
             # 执行命令
+            logger.debug(f"执行FFmpeg命令生成拼接预览")
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
             if result.returncode == 0 and os.path.exists(merged_preview_path):
                 # 缓存结果
                 self._cached_merged_preview = merged_preview_path
+                logger.info(f"拼接预览生成成功: {merged_preview_path}")
                 return merged_preview_path
             else:
+                logger.error(f"拼接预览生成失败 (returncode={result.returncode})")
+                if result.stderr:
+                    logger.error(f"FFmpeg错误: {result.stderr[-500:]}")  # 只记录最后500字符
                 return None
 
         except Exception as e:
-            print(f"生成拼接预览失败: {str(e)}")
+            logger.error(f"生成拼接预览时发生异常: {str(e)}", exc_info=True)
             return None
 
     def _select_cover_image(self):
@@ -619,6 +652,14 @@ class VideoSplitApp:
         self.audio_source = tk.StringVar(value="template")  # template/list/mix/custom/none
         self.custom_audio_path = tk.StringVar()
 
+        # 输出尺寸配置
+        self.output_size_mode = tk.StringVar(value="template")  # template/list/custom
+        self.output_width = tk.IntVar(value=1920)
+        self.output_height = tk.IntVar(value=1080)
+        self.scale_mode = tk.StringVar(value="fit")  # fit/fill/stretch
+        self.template_width = 0  # 模板视频原始宽度
+        self.template_height = 0  # 模板视频原始高度
+
         # 预览相关
         self.preview_image = None
         self.preview_photo = None
@@ -650,27 +691,49 @@ class VideoSplitApp:
         ttk.Entry(entry_frame, textvariable=self.template_video).pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
         ttk.Button(entry_frame, text="选择", command=self._select_template, width=8).pack(side=tk.LEFT, padx=5)
 
-        # ============ 2. 分割方式 ============
-        split_frame = ttk.LabelFrame(main_frame, text="分割方式", padding="5")
-        split_frame.pack(fill=tk.X, pady=3)
+        # 模板视频信息显示
+        self.template_info_var = tk.StringVar(value="")
+        template_info_label = ttk.Label(template_frame, textvariable=self.template_info_var,
+                                         foreground='#0066cc', font=('Arial', 9))
+        template_info_label.pack(anchor=tk.W, padx=5, pady=(3, 0))
 
-        ttk.Radiobutton(split_frame, text="左右分割", variable=self.split_mode,
-                        value="horizontal", command=self._update_preview).pack(side=tk.LEFT, padx=15)
-        ttk.Radiobutton(split_frame, text="上下分割", variable=self.split_mode,
-                        value="vertical", command=self._update_preview).pack(side=tk.LEFT, padx=15)
-
-        # ============ 3. 模板分割预览 ============
-        preview_frame = ttk.LabelFrame(main_frame, text="模板分割预览（拖拽调整）", padding="5")
+        # ============ 2. 预览区域（模板分割 + 拼接效果） ============
+        preview_frame = ttk.LabelFrame(main_frame, text="预览", padding="5")
         preview_frame.pack(fill=tk.X, pady=3)
 
-        self.preview_canvas = tk.Canvas(preview_frame, width=self.canvas_width, height=self.canvas_height,
+        # 分割方式选项（集成到预览区域顶部）
+        split_option_frame = ttk.Frame(preview_frame)
+        split_option_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(split_option_frame, text="分割方式:").pack(side=tk.LEFT, padx=3)
+        ttk.Radiobutton(split_option_frame, text="左右分割", variable=self.split_mode,
+                        value="horizontal", command=self._update_preview).pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(split_option_frame, text="上下分割", variable=self.split_mode,
+                        value="vertical", command=self._update_preview).pack(side=tk.LEFT, padx=10)
+
+        # 预览画布区域（左：模板分割，右：拼接效果）
+        canvas_container = ttk.Frame(preview_frame)
+        canvas_container.pack(fill=tk.BOTH, expand=True, pady=3)
+
+        # 左侧：模板分割预览
+        left_preview = ttk.Frame(canvas_container)
+        left_preview.pack(side=tk.LEFT, padx=(10, 30))
+        ttk.Label(left_preview, text="模板分割（拖拽调整）", font=('Arial', 9)).pack()
+        self.preview_canvas = tk.Canvas(left_preview, width=self.canvas_width, height=self.canvas_height,
                                         bg='#333333', highlightthickness=1, highlightbackground='#666666')
         self.preview_canvas.pack(pady=3)
-
         self.preview_canvas.bind('<Button-1>', self._on_canvas_click)
         self.preview_canvas.bind('<B1-Motion>', self._on_canvas_drag)
         self.preview_canvas.bind('<ButtonRelease-1>', self._on_canvas_release)
 
+        # 右侧：拼接效果预览
+        right_preview = ttk.Frame(canvas_container)
+        right_preview.pack(side=tk.LEFT, padx=(30, 10), expand=True)
+        ttk.Label(right_preview, text="拼接效果示意", font=('Arial', 9)).pack()
+        self.merge_preview_canvas = tk.Canvas(right_preview, width=220, height=self.canvas_height,
+                                               highlightthickness=1, highlightbackground='#cccccc')
+        self.merge_preview_canvas.pack(pady=3)
+
+        # 分割位置滑块
         ratio_frame = ttk.Frame(preview_frame)
         ratio_frame.pack(fill=tk.X, pady=3)
         ttk.Label(ratio_frame, text="分割位置:").pack(side=tk.LEFT, padx=3)
@@ -711,19 +774,16 @@ class VideoSplitApp:
         # 双击编辑
         self.tree.bind('<Double-1>', self._on_tree_double_click)
 
-        # 按钮行1
+        # 按钮行（合并所有操作按钮）
         btn_frame = ttk.Frame(list_frame)
-        btn_frame.pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame, text="添加", command=self._add_videos, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="编辑", command=self._edit_selected, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="删除", command=self._remove_selected, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="清空", command=self._clear_list, width=8).pack(side=tk.LEFT, padx=2)
-
-        # 按钮行2
-        btn_frame2 = ttk.Frame(list_frame)
-        btn_frame2.pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame2, text="同步模板分割", command=self._sync_template_ratio, width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame2, text="应用到全部", command=self._apply_to_all, width=12).pack(side=tk.LEFT, padx=2)
+        btn_frame.pack(fill=tk.X, pady=3)
+        ttk.Button(btn_frame, text="添加", command=self._add_videos, width=7).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="编辑", command=self._edit_selected, width=7).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="删除", command=self._remove_selected, width=7).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="清空", command=self._clear_list, width=7).pack(side=tk.LEFT, padx=4)
+        # 分隔符
+        ttk.Separator(btn_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(btn_frame, text="应用到全部", command=self._apply_to_all, width=10).pack(side=tk.LEFT, padx=4)
 
         # ============ 5. 拼接方式（勾选） ============
         merge_frame = ttk.LabelFrame(main_frame, text="拼接设置", padding="5")
@@ -753,18 +813,77 @@ class VideoSplitApp:
         order_frame = ttk.Frame(merge_frame)
         order_frame.pack(fill=tk.X, pady=2)
         ttk.Label(order_frame, text="位置顺序:").pack(side=tk.LEFT, padx=3)
-        ttk.Radiobutton(order_frame, text="模板在前 (A+C)", variable=self.position_order,
+        ttk.Radiobutton(order_frame, text="模板视频在左/上", variable=self.position_order,
                         value="template_first", command=self._on_merge_change).pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(order_frame, text="列表在前 (C+A)", variable=self.position_order,
+        ttk.Radiobutton(order_frame, text="列表视频在左/上", variable=self.position_order,
                         value="list_first", command=self._on_merge_change).pack(side=tk.LEFT, padx=5)
 
         # 拼接预览说明
-        self.merge_preview_var = tk.StringVar(value="拼接: A+C")
+        self.merge_preview_var = tk.StringVar(value="")
         ttk.Label(merge_frame, textvariable=self.merge_preview_var, foreground='blue').pack(anchor=tk.W, padx=5, pady=2)
 
         self.split_mode.trace_add('write', lambda *args: self._on_merge_change())
 
-        # ============ 6. 音频设置 ============
+        # ============ 6. 输出尺寸设置 ============
+        output_size_frame = ttk.LabelFrame(main_frame, text="输出尺寸", padding="5")
+        output_size_frame.pack(fill=tk.X, pady=3)
+
+        # 尺寸模式选择
+        size_mode_frame = ttk.Frame(output_size_frame)
+        size_mode_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Radiobutton(size_mode_frame, text="跟随模板视频", variable=self.output_size_mode,
+                        value="template", command=self._on_output_size_mode_change).pack(side=tk.LEFT, padx=8)
+        ttk.Radiobutton(size_mode_frame, text="跟随列表视频（一对一）", variable=self.output_size_mode,
+                        value="list", command=self._on_output_size_mode_change).pack(side=tk.LEFT, padx=8)
+        ttk.Radiobutton(size_mode_frame, text="自定义尺寸", variable=self.output_size_mode,
+                        value="custom", command=self._on_output_size_mode_change).pack(side=tk.LEFT, padx=8)
+
+        # 自定义尺寸输入
+        self.custom_size_frame = ttk.Frame(output_size_frame)
+        self.custom_size_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(self.custom_size_frame, text="宽度:").pack(side=tk.LEFT, padx=3)
+        self.width_spinbox = ttk.Spinbox(self.custom_size_frame, from_=100, to=7680, width=6,
+                                          textvariable=self.output_width)
+        self.width_spinbox.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(self.custom_size_frame, text="高度:").pack(side=tk.LEFT, padx=3)
+        self.height_spinbox = ttk.Spinbox(self.custom_size_frame, from_=100, to=4320, width=6,
+                                           textvariable=self.output_height)
+        self.height_spinbox.pack(side=tk.LEFT, padx=2)
+
+        # 预设尺寸
+        ttk.Label(self.custom_size_frame, text="预设:").pack(side=tk.LEFT, padx=(10, 3))
+        self.preset_combo = ttk.Combobox(self.custom_size_frame, width=15, state="readonly",
+                                          values=["竖屏1080p (1080x1920)",
+                                                  "竖屏720p (720x1280)",
+                                                  "横屏1080p (1920x1080)",
+                                                  "横屏720p (1280x720)",
+                                                  "正方形1080 (1080x1080)",
+                                                  "正方形720 (720x720)"])
+        self.preset_combo.pack(side=tk.LEFT, padx=2)
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
+
+        # 缩放/裁剪模式
+        self.scale_mode_frame = ttk.Frame(output_size_frame)
+        self.scale_mode_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(self.scale_mode_frame, text="缩放模式:").pack(side=tk.LEFT, padx=3)
+        ttk.Radiobutton(self.scale_mode_frame, text="适应(留黑边)", variable=self.scale_mode,
+                        value="fit").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.scale_mode_frame, text="填充(裁剪)", variable=self.scale_mode,
+                        value="fill").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.scale_mode_frame, text="拉伸", variable=self.scale_mode,
+                        value="stretch").pack(side=tk.LEFT, padx=5)
+
+        # 输出尺寸预览
+        self.output_size_info = tk.StringVar(value="输出: 等待选择模板视频")
+        ttk.Label(output_size_frame, textvariable=self.output_size_info, foreground='#666666').pack(anchor=tk.W, padx=5, pady=2)
+
+        # 初始化时禁用自定义尺寸输入
+        self._on_output_size_mode_change()
+
+        # ============ 7. 音频设置 ============
         audio_frame = ttk.LabelFrame(main_frame, text="音频设置", padding="5")
         audio_frame.pack(fill=tk.X, pady=3)
 
@@ -934,28 +1053,199 @@ class VideoSplitApp:
 
         # 获取位置顺序
         is_template_first = self.position_order.get() == "template_first"
-        order_hint = "模板在前" if is_template_first else "列表在前"
+
+        # 根据分割模式确定方位词
+        if mode == "horizontal":
+            first_side = "左"
+            second_side = "右"
+        else:
+            first_side = "上"
+            second_side = "下"
+
+        # 根据位置顺序确定模板和列表的位置
+        if is_template_first:
+            template_pos = first_side
+            list_pos = second_side
+        else:
+            template_pos = second_side
+            list_pos = first_side
 
         if len(template_parts) == 0 or len(list_parts) == 0:
             if len(template_parts) == 0 and len(list_parts) > 0:
-                self.merge_preview_var.set(f"仅使用列表视频: {'+'.join(list_parts)}")
+                self.merge_preview_var.set("仅使用列表视频")
             elif len(list_parts) == 0 and len(template_parts) > 0:
-                self.merge_preview_var.set(f"仅使用模板视频: {'+'.join(template_parts)}")
+                self.merge_preview_var.set("仅使用模板视频")
             else:
                 self.merge_preview_var.set("请勾选要使用的部分")
         else:
             # 计算组合数
             combinations = len(template_parts) * len(list_parts)
-            # 根据位置顺序调整显示
-            if is_template_first:
-                combo_list = [f"{t}+{l}" for t in template_parts for l in list_parts]
-            else:
-                combo_list = [f"{l}+{t}" for t in template_parts for l in list_parts]
 
             if combinations == 1:
-                self.merge_preview_var.set(f"拼接方式: {combo_list[0]} ({order_hint})")
+                self.merge_preview_var.set(f"拼接方式: 模板视频在{template_pos}，列表视频在{list_pos}")
             else:
-                self.merge_preview_var.set(f"将生成 {combinations} 个视频: {', '.join(combo_list)} ({order_hint})")
+                # 生成友好的描述
+                template_parts_desc = "、".join([f"模板{first_side if p=='A' else second_side}侧" for p in template_parts])
+                list_parts_desc = "、".join([f"列表{first_side if p=='C' else second_side}侧" for p in list_parts])
+                self.merge_preview_var.set(
+                    f"将生成 {combinations} 个视频\n"
+                    f"模板: {template_parts_desc} | 列表: {list_parts_desc}\n"
+                    f"位置: 模板在{template_pos}，列表在{list_pos}"
+                )
+
+        # 更新拼接效果预览图
+        self._draw_merge_preview()
+
+    def _draw_merge_preview(self):
+        """绘制拼接效果示意图"""
+        canvas = self.merge_preview_canvas
+        canvas.delete("all")
+
+        # 获取canvas尺寸
+        w = 200
+        h = self.canvas_height
+
+        mode = self.split_mode.get()
+        is_template_first = self.position_order.get() == "template_first"
+
+        # 定义颜色
+        template_color = "#4A90D9"  # 蓝色 - 模板视频
+        list_color = "#E8A838"       # 橙色 - 列表视频
+        template_text = "模板"
+        list_text = "列表"
+
+        padding = 10
+        preview_w = w - 2 * padding
+        preview_h = h - 2 * padding
+
+        if mode == "horizontal":
+            # 左右拼接
+            half_w = preview_w // 2
+            if is_template_first:
+                # 模板在左
+                canvas.create_rectangle(padding, padding, padding + half_w, padding + preview_h,
+                                        fill=template_color, outline="#333")
+                canvas.create_text(padding + half_w // 2, padding + preview_h // 2,
+                                   text=template_text, fill="white", font=('Arial', 10, 'bold'))
+                canvas.create_rectangle(padding + half_w, padding, padding + preview_w, padding + preview_h,
+                                        fill=list_color, outline="#333")
+                canvas.create_text(padding + half_w + half_w // 2, padding + preview_h // 2,
+                                   text=list_text, fill="white", font=('Arial', 10, 'bold'))
+            else:
+                # 列表在左
+                canvas.create_rectangle(padding, padding, padding + half_w, padding + preview_h,
+                                        fill=list_color, outline="#333")
+                canvas.create_text(padding + half_w // 2, padding + preview_h // 2,
+                                   text=list_text, fill="white", font=('Arial', 10, 'bold'))
+                canvas.create_rectangle(padding + half_w, padding, padding + preview_w, padding + preview_h,
+                                        fill=template_color, outline="#333")
+                canvas.create_text(padding + half_w + half_w // 2, padding + preview_h // 2,
+                                   text=template_text, fill="white", font=('Arial', 10, 'bold'))
+        else:
+            # 上下拼接
+            half_h = preview_h // 2
+            if is_template_first:
+                # 模板在上
+                canvas.create_rectangle(padding, padding, padding + preview_w, padding + half_h,
+                                        fill=template_color, outline="#333")
+                canvas.create_text(padding + preview_w // 2, padding + half_h // 2,
+                                   text=template_text, fill="white", font=('Arial', 10, 'bold'))
+                canvas.create_rectangle(padding, padding + half_h, padding + preview_w, padding + preview_h,
+                                        fill=list_color, outline="#333")
+                canvas.create_text(padding + preview_w // 2, padding + half_h + half_h // 2,
+                                   text=list_text, fill="white", font=('Arial', 10, 'bold'))
+            else:
+                # 列表在上
+                canvas.create_rectangle(padding, padding, padding + preview_w, padding + half_h,
+                                        fill=list_color, outline="#333")
+                canvas.create_text(padding + preview_w // 2, padding + half_h // 2,
+                                   text=list_text, fill="white", font=('Arial', 10, 'bold'))
+                canvas.create_rectangle(padding, padding + half_h, padding + preview_w, padding + preview_h,
+                                        fill=template_color, outline="#333")
+                canvas.create_text(padding + preview_w // 2, padding + half_h + half_h // 2,
+                                   text=template_text, fill="white", font=('Arial', 10, 'bold'))
+
+    def _on_output_size_mode_change(self):
+        """当输出尺寸模式改变时"""
+        mode = self.output_size_mode.get()
+
+        if mode == "template":
+            # 跟随模板视频 - 禁用自定义尺寸输入和缩放模式
+            self.width_spinbox.config(state="disabled")
+            self.height_spinbox.config(state="disabled")
+            self.preset_combo.config(state="disabled")
+            for child in self.scale_mode_frame.winfo_children():
+                if isinstance(child, ttk.Radiobutton):
+                    child.config(state="disabled")
+            if self.template_width > 0 and self.template_height > 0:
+                self.output_size_info.set(f"输出: {self.template_width}x{self.template_height} (跟随模板)")
+            else:
+                self.output_size_info.set("输出: 等待选择模板视频")
+        elif mode == "list":
+            # 跟随列表视频（一对一）- 禁用自定义尺寸输入和缩放模式
+            self.width_spinbox.config(state="disabled")
+            self.height_spinbox.config(state="disabled")
+            self.preset_combo.config(state="disabled")
+            for child in self.scale_mode_frame.winfo_children():
+                if isinstance(child, ttk.Radiobutton):
+                    child.config(state="disabled")
+            if self.video_items:
+                self.output_size_info.set("输出: 每个视频使用自己的尺寸（一对一）")
+            else:
+                self.output_size_info.set("输出: 等待添加列表视频")
+        else:
+            # 自定义尺寸 - 启用自定义尺寸输入和缩放模式
+            self.width_spinbox.config(state="normal")
+            self.height_spinbox.config(state="normal")
+            self.preset_combo.config(state="readonly")
+            for child in self.scale_mode_frame.winfo_children():
+                if isinstance(child, ttk.Radiobutton):
+                    child.config(state="normal")
+            self._update_output_size_info()
+
+    def _on_preset_selected(self, event):
+        """当选择预设尺寸时"""
+        preset = self.preset_combo.get()
+        # 解析预设尺寸
+        presets = {
+            "竖屏1080p (1080x1920)": (1080, 1920),
+            "竖屏720p (720x1280)": (720, 1280),
+            "横屏1080p (1920x1080)": (1920, 1080),
+            "横屏720p (1280x720)": (1280, 720),
+            "正方形1080 (1080x1080)": (1080, 1080),
+            "正方形720 (720x720)": (720, 720),
+        }
+        if preset in presets:
+            w, h = presets[preset]
+            self.output_width.set(w)
+            self.output_height.set(h)
+            self._update_output_size_info()
+
+    def _update_output_size_info(self):
+        """更新输出尺寸信息显示"""
+        w = self.output_width.get()
+        h = self.output_height.get()
+        if w > h:
+            orientation = "横屏"
+        elif h > w:
+            orientation = "竖屏"
+        else:
+            orientation = "正方形"
+        self.output_size_info.set(f"输出: {w}x{h} ({orientation})")
+
+    def _update_output_size_from_template(self):
+        """根据模板视频更新输出尺寸默认值"""
+        if self.template_width > 0 and self.template_height > 0:
+            self.output_width.set(self.template_width)
+            self.output_height.set(self.template_height)
+            if self.output_size_mode.get() == "template":
+                self.output_size_info.set(f"输出: {self.template_width}x{self.template_height} (跟随模板)")
+
+    def _update_list_video_info(self):
+        """更新列表视频相关显示"""
+        # 更新输出尺寸显示（当选择跟随列表时）
+        if self.output_size_mode.get() == "list":
+            self._on_output_size_mode_change()
 
     def _sync_template_ratio(self):
         """将模板分割比例同步到所有列表视频"""
@@ -1020,7 +1310,17 @@ class VideoSplitApp:
 
                 info = get_video_info(video_path)
                 if info:
-                    self.status_var.set(f"模板视频: {info['width']}x{info['height']}, 时长: {format_duration(info['duration'])}")
+                    width = info.get('width', 0)
+                    height = info.get('height', 0)
+                    duration = info.get('duration', 0)
+                    # 保存模板视频尺寸供后续使用
+                    self.template_width = width
+                    self.template_height = height
+                    # 更新显示
+                    self.template_info_var.set(f"尺寸: {format_video_info(width, height, duration)}")
+                    self.status_var.set(f"已加载模板视频")
+                    # 更新输出尺寸默认值
+                    self._update_output_size_from_template()
             except Exception as e:
                 self._draw_placeholder()
         else:
@@ -1060,6 +1360,9 @@ class VideoSplitApp:
 
         self.ratio_label.config(text=f"{int(self.split_ratio.get() * 100)}%")
 
+        # 更新拼接效果预览
+        self._draw_merge_preview()
+
     def _on_ratio_change(self, value):
         self._update_preview()
 
@@ -1093,6 +1396,7 @@ class VideoSplitApp:
                 video_item.split_ratio = self.split_ratio.get()  # 默认使用当前分割比例
                 self.video_items.append(video_item)
         self._refresh_tree()
+        self._update_list_video_info()
 
     def _remove_selected(self):
         selection = self.tree.selection()
@@ -1100,10 +1404,12 @@ class VideoSplitApp:
             index = self.tree.index(item_id)
             del self.video_items[index]
         self._refresh_tree()
+        self._update_list_video_info()
 
     def _clear_list(self):
         self.video_items.clear()
         self._refresh_tree()
+        self._update_list_video_info()
 
     def _select_output_dir(self):
         dir_path = filedialog.askdirectory(title="选择输出目录")
@@ -1248,6 +1554,28 @@ class VideoSplitApp:
                 audio_source = self.audio_source.get()
                 custom_audio = self.custom_audio_path.get() if audio_source == "custom" else None
 
+                # 获取输出尺寸和缩放模式
+                size_mode = self.output_size_mode.get()
+                if size_mode == "custom":
+                    out_width = self.output_width.get()
+                    out_height = self.output_height.get()
+                    scale_mode = self.scale_mode.get()
+                elif size_mode == "list":
+                    # 跟随列表视频（一对一）：获取当前视频的尺寸
+                    video_info = get_video_info(video_item.path)
+                    if video_info:
+                        out_width = video_info.get('width', 0)
+                        out_height = video_info.get('height', 0)
+                    else:
+                        out_width = None
+                        out_height = None
+                    scale_mode = "fit"  # 跟随列表时使用适应模式
+                else:
+                    # 跟随模板或默认
+                    out_width = None  # None表示自动跟随模板
+                    out_height = None
+                    scale_mode = None
+
                 result = self.processor.process_videos(
                     template_video=self.template_video.get(),
                     target_video=video_item.path,
@@ -1264,7 +1592,10 @@ class VideoSplitApp:
                     cover_frame_source=video_item.cover_frame_source,
                     position_order=self.position_order.get(),
                     audio_source=audio_source,
-                    custom_audio_path=custom_audio
+                    custom_audio_path=custom_audio,
+                    output_width=out_width,
+                    output_height=out_height,
+                    scale_mode=scale_mode
                 )
 
                 result_name = f"{video_item.name} ({merge_mode.upper()})"

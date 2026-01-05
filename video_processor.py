@@ -161,7 +161,10 @@ class VideoProcessor:
         cover_frame_source: str = "template",
         position_order: str = "template_first",
         audio_source: str = "template",
-        custom_audio_path: str = None
+        custom_audio_path: str = None,
+        output_width: int = None,
+        output_height: int = None,
+        scale_mode: str = None
     ) -> ProcessResult:
         """
         处理视频：分割并拼接
@@ -183,6 +186,9 @@ class VideoProcessor:
             position_order: 位置顺序 (template_first/list_first)
             audio_source: 音频来源 (template/list/mix/custom/none)
             custom_audio_path: 自定义音频文件路径
+            output_width: 自定义输出宽度，None则使用模板视频宽度
+            output_height: 自定义输出高度，None则使用模板视频高度
+            scale_mode: 缩放模式 (fit/fill/stretch)，None则默认fit
 
         Returns:
             ProcessResult: 处理结果
@@ -217,9 +223,17 @@ class VideoProcessor:
             if target_info['width'] == 0 or target_info['height'] == 0:
                 return ProcessResult(False, error="目标视频尺寸无效")
 
-            # 确定输出尺寸（使用模板视频的尺寸）
-            out_width = template_info['width']
-            out_height = template_info['height']
+            # 确定输出尺寸
+            if output_width and output_height:
+                # 使用自定义尺寸
+                out_width = output_width
+                out_height = output_height
+                logger.info(f"使用自定义输出尺寸: {out_width}x{out_height}")
+            else:
+                # 使用模板视频的尺寸
+                out_width = template_info['width']
+                out_height = template_info['height']
+                logger.info(f"使用模板视频尺寸: {out_width}x{out_height}")
 
             # 确定较长的时长
             max_duration = max(template_info['duration'], target_info['duration'])
@@ -247,7 +261,8 @@ class VideoProcessor:
                     template_has_audio, target_has_audio,
                     target_scale_percent,
                     position_order,
-                    audio_source
+                    audio_source,
+                    scale_mode or "fit"  # 默认使用fit模式
                 )
             except ValueError as e:
                 return ProcessResult(False, error=str(e))
@@ -483,7 +498,8 @@ class VideoProcessor:
         target_has_audio: bool = True,
         target_scale_percent: int = 100,
         position_order: str = "template_first",
-        audio_source: str = "template"
+        audio_source: str = "template",
+        scale_mode: str = "fit"
     ) -> str:
         """
         构建FFmpeg filter_complex字符串
@@ -502,7 +518,15 @@ class VideoProcessor:
             target_scale_percent: 目标视频缩放百分比
             position_order: 位置顺序 (template_first/list_first)
             audio_source: 音频来源 (template/list/mix/custom/none)
+            scale_mode: 缩放模式 (fit/fill/stretch)
         """
+        # 记录缩放模式（当前实现使用stretch模式，fit和fill模式需要更复杂的filter构建）
+        logger.debug(f"缩放模式: {scale_mode}")
+        # TODO: 完整实现fit和fill模式需要重构filter构建逻辑
+        # fit: 使用force_original_aspect_ratio=decrease + pad
+        # fill: 使用force_original_aspect_ratio=increase + crop
+        # stretch: 使用force_original_aspect_ratio=disable (当前行为)
+
         # 根据audio_source构建音频部分的filter
         audio_filter = None
         if audio_source == "mix":

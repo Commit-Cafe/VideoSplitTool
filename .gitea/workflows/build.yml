@@ -1,0 +1,167 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v 开头的标签时触发（如 v1.0.0）
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow
+
+      - name: Build Windows executable
+        run: |
+          pyinstaller --onefile --windowed --name VideoSplitTool main.py
+
+      - name: Download FFmpeg
+        run: |
+          # 下载 FFmpeg
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "."
+
+          # 找到 ffmpeg 目录并复制
+          $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+          New-Item -ItemType Directory -Path "dist\ffmpeg\bin" -Force
+          Copy-Item "$($ffmpegDir.FullName)\bin\ffmpeg.exe" "dist\ffmpeg\bin\"
+          Copy-Item "$($ffmpegDir.FullName)\bin\ffprobe.exe" "dist\ffmpeg\bin\"
+
+      - name: Create README
+        run: |
+          @"
+          视频分割拼接工具 V2.2 - Windows 版
+
+          使用说明：
+          1. 双击运行 VideoSplitTool.exe
+          2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          功能特性：
+          - 视频分割与拼接（支持左右/上下）
+          - 输出尺寸配置（跟随模板/跟随列表/自定义）
+          - 封面选帧实时预览
+          - 音频配置（模板/列表/混合/静音/自定义）
+          - 批量处理支持
+
+          技术支持：${{ gitea.server_url }}/${{ gitea.repository }}
+          "@ | Out-File -FilePath "dist\README.txt" -Encoding utf8
+
+      - name: Create distribution package
+        run: |
+          $version = "${{ gitea.ref_name }}" -replace '^v', ''
+          if ([string]::IsNullOrEmpty($version)) { $version = "dev" }
+          $timestamp = Get-Date -Format "yyyyMMdd"
+          Compress-Archive -Path "dist\*" -DestinationPath "VideoSplitTool_Windows_${version}_${timestamp}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-build
+          path: VideoSplitTool_Windows_*.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --onefile --windowed --name VideoSplitTool main.py
+
+      - name: Download FFmpeg for macOS
+        run: |
+          # 使用 Homebrew 下载 FFmpeg
+          brew install ffmpeg
+
+          # 创建目录并复制 FFmpeg
+          mkdir -p dist/ffmpeg/bin
+          cp $(which ffmpeg) dist/ffmpeg/bin/
+          cp $(which ffprobe) dist/ffmpeg/bin/
+
+      - name: Create README
+        run: |
+          cat > dist/README.txt << 'EOF'
+          视频分割拼接工具 V2.2 - macOS 版
+
+          使用说明：
+          1. 双击运行 VideoSplitTool
+             如果提示"无法打开"，请在终端执行:
+             chmod +x VideoSplitTool
+             ./VideoSplitTool
+
+          2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          3. 如果遇到安全提示：
+             系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
+
+          功能特性：
+          - 视频分割与拼接（支持左右/上下）
+          - 输出尺寸配置（跟随模板/跟随列表/自定义）
+          - 封面选帧实时预览
+          - 音频配置（模板/列表/混合/静音/自定义）
+          - 批量处理支持
+          EOF
+
+      - name: Create distribution package
+        run: |
+          version="${{ gitea.ref_name }}"
+          version="${version#v}"
+          [ -z "$version" ] && version="dev"
+          timestamp=$(date +%Y%m%d)
+          cd dist
+          zip -r "../VideoSplitTool_macOS_${version}_${timestamp}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-build
+          path: VideoSplitTool_macOS_*.zip
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(gitea.ref, 'refs/tags/')
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-build
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-build
+
+      - name: List artifacts
+        run: ls -la
+
+      - name: Create Gitea Release
+        uses: akkuman/gitea-release-action@v1
+        with:
+          files: |-
+            VideoSplitTool_Windows_*.zip
+            VideoSplitTool_macOS_*.zip
+          token: ${{ secrets.GITEA_TOKEN }}
