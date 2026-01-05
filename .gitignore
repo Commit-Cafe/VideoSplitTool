@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -44,18 +45,45 @@ tmp/
 Thumbs.db
 desktop.ini
 
-# Project specific
+# Logs
+logs/
+*.log
+
+# Project specific - FFmpeg and media files
 release/
 ffmpeg/
+ffmpeg-8.0.1-full_build/
 *.zip
 *.mp4
 *.avi
 *.mkv
 *.mov
-doct/
+*.flv
+*.wmv
 test_videos/
 output/
-ffmpeg-8.0.1-full_build/
 list/
 model.mp4
-/ffmpeg-8.0.1-full_build/
+
+# Development documentation (excluded)
+doct/
+V2.1_COMPLETION_SUMMARY.md
+WEB_VERSION_PLANNING.md
+WEB_ALTERNATIVE_SOLUTIONS.md
+GITEA_SETUP_GUIDE.md
+QUICK_START.md
+
+# Temporary scripts (excluded)
+fix_git_large_files.bat
+setup_github.bat
+setup_github_simple.bat
+push_to_github.bat
+push_all.bat
+
+# Keep these important files (don't add them here):
+# README.md - Project overview
+# RELEASE_NOTES_V2.1.md - User release notes
+# MACOS_USER_GUIDE.md - User guide for macOS
+# build.bat - Build script
+# main.py - Main application
+# *.py - Python source files
