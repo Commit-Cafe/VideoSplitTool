@@ -1,8 +1,8 @@
-# 视频分割拼接工具 V2.1
+# 视频分割拼接工具 V2.2
 
 一个功能强大的视频分割和拼接工具，支持自定义分割比例、封面设置、音频配置等高级功能。
 
-**最新版本 V2.1** - 全面提升稳定性和用户体验！
+**最新版本 V2.2** - 全面重构架构，提升代码可维护性！
 
 ## 功能特点
 
@@ -90,35 +90,54 @@
 - Pillow (图像处理)
 - PyInstaller (打包)
 
+## 项目结构
+
+```
+video_pin/
+├── src/                    # 源代码（分层架构）
+│   ├── models/            # 数据模型层
+│   ├── core/              # 核心业务层
+│   ├── ui/                # UI界面层
+│   └── utils/             # 工具函数层
+├── docs/                   # 项目文档
+├── main.py                # 主入口
+├── requirements.txt       # 依赖
+└── .github/               # GitHub Actions
+```
+
+详细架构说明请参考 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ## 开发
 
 ### 环境配置
 
 ```bash
 # 安装依赖
-pip install pillow
+pip install -r requirements.txt
 
 # 运行程序
 python main.py
 ```
 
-### 打包
+### 自动化打包
 
-**Windows:**
-```bash
-python package.py
-```
-
-**macOS:**
-```bash
-python3 package_macos.py
-```
-
-**自动化打包（推荐）:**
-
-使用 GitHub Actions 自动在 Windows 和 macOS 上打包，详见 [GITHUB_ACTIONS_GUIDE.md](GITHUB_ACTIONS_GUIDE.md)
+使用 GitHub Actions 自动在 Windows 和 macOS 上打包，详见 [docs/GITHUB_ACTIONS_GUIDE.md](docs/GITHUB_ACTIONS_GUIDE.md)
 
 ## 更新日志
+
+### V2.2 (2026-01-06) 🚀
+
+**架构重构:**
+- ✅ **分层架构** - 拆分为 models/core/ui/utils 四层
+- ✅ **模块化设计** - 降低代码耦合度，提升可维护性
+- ✅ **完整文档** - 新增架构文档和模块依赖图
+
+**功能优化:**
+- ✅ **输出尺寸选项** - 跟随模板/跟随列表（一对一）/自定义尺寸
+- ✅ **UI改进** - 优化预览区域布局，移除冗余按钮
+- ✅ **导入修复** - 修复所有模块导入路径
+
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 获取架构详情。
 
 ### V2.1 (2026-01-04) 🎉
 
@@ -142,7 +161,7 @@ python3 package_macos.py
 - 修复6处裸异常捕获问题
 - 完善窗口关闭事件处理
 
-详见 [CHANGELOG_V2.1.md](CHANGELOG_V2.1.md) 获取完整更新详情。
+详见 [docs/CHANGELOG_V2.1.md](docs/CHANGELOG_V2.1.md) 获取完整更新详情。
 
 ### V2.0 (2026-01-04)
 

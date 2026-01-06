@@ -74,5 +74,5 @@ web/
 # main.py - Main application entry
 # requirements.txt - Dependencies
 # src/ - Source code
-# docs/ - Documentation
+docs/
 # .github/ - GitHub workflows
