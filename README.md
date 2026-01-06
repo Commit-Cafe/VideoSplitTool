@@ -14,12 +14,6 @@
 - ✅ **可视化预览** - 实时预览分割效果和封面帧
 - ✅ **位置顺序** - 自由控制模板和列表视频的拼接顺序
 
-## 下载
-
-前往 [Releases](../../releases) 页面下载最新版本：
-
-- **Windows** - `VideoSplitTool_Windows_*.zip`
-- **macOS** - `VideoSplitTool_macOS_*.zip`
 
 ## 使用说明
 
@@ -99,13 +93,10 @@ video_pin/
 │   ├── core/              # 核心业务层
 │   ├── ui/                # UI界面层
 │   └── utils/             # 工具函数层
-├── docs/                   # 项目文档
 ├── main.py                # 主入口
 ├── requirements.txt       # 依赖
 └── .github/               # GitHub Actions
 ```
-
-详细架构说明请参考 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## 开发
 
@@ -119,13 +110,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 自动化打包
-
-使用 GitHub Actions 自动在 Windows 和 macOS 上打包，详见 [docs/GITHUB_ACTIONS_GUIDE.md](docs/GITHUB_ACTIONS_GUIDE.md)
-
 ## 更新日志
 
-### V2.2 (2026-01-06) 🚀
+### V2.2 (
 
 **架构重构:**
 - ✅ **分层架构** - 拆分为 models/core/ui/utils 四层
@@ -137,9 +124,7 @@ python main.py
 - ✅ **UI改进** - 优化预览区域布局，移除冗余按钮
 - ✅ **导入修复** - 修复所有模块导入路径
 
-详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 获取架构详情。
-
-### V2.1 (2026-01-04) 🎉
+### V2.1 
 
 **稳定性改进:**
 - ✅ **日志系统** - 完整的日志记录，便于问题诊断
@@ -160,8 +145,6 @@ python main.py
 - 新增 `error_handler.py` - 错误诊断和输入验证
 - 修复6处裸异常捕获问题
 - 完善窗口关闭事件处理
-
-详见 [docs/CHANGELOG_V2.1.md](docs/CHANGELOG_V2.1.md) 获取完整更新详情。
 
 ### V2.0 (2026-01-04)
 
