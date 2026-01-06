@@ -6,8 +6,9 @@ import uuid
 import glob
 from datetime import datetime
 from typing import List
-from utils import get_temp_dir
-from logger import logger
+
+from .file_utils import get_temp_dir
+from .logger import logger
 
 
 class TempFileManager:
@@ -40,7 +41,7 @@ class TempFileManager:
         cleaned = 0
         failed = 0
 
-        for file_path in self.temp_files[:]:  # 使用副本遍历
+        for file_path in self.temp_files[:]:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
@@ -72,7 +73,6 @@ class TempFileManager:
             cutoff_time = current_time - (days * 24 * 3600)
             cleaned = 0
 
-            # 清理所有旧文件
             for file_path in glob.glob(os.path.join(self.temp_dir, "*")):
                 try:
                     if os.path.isfile(file_path):

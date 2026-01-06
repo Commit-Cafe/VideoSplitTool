@@ -1,8 +1,11 @@
 """
 智能错误诊断和处理模块
 """
+import os
 from typing import Tuple, List
-from logger import logger
+
+from ..utils.logger import logger
+from ..utils.file_utils import is_valid_video
 
 
 class ErrorDiagnostics:
@@ -157,12 +160,10 @@ class ErrorDiagnostics:
         for line in reversed(lines):
             line_lower = line.lower()
             if 'error' in line_lower:
-                # 移除FFmpeg前缀
                 line = line.replace('[error]', '').replace('Error', '').strip()
-                if line and len(line) < 200:  # 避免过长
+                if line and len(line) < 200:
                     return line
 
-        # 返回最后几行
         return ' '.join(lines[-3:]) if len(lines) >= 3 else stderr[:200]
 
 
@@ -180,8 +181,7 @@ class InputValidator:
         Returns:
             Tuple[bool, str]: (是否有效, 错误信息)
         """
-        import os
-        from utils import is_valid_video, get_video_info
+        from .ffmpeg_utils import FFmpegHelper
 
         if not file_path:
             return False, "文件路径为空"
@@ -199,29 +199,21 @@ class InputValidator:
             return False, "文件格式不支持（仅支持mp4, avi, mkv, mov等）"
 
         # 尝试获取视频信息验证文件完整性
-        info = get_video_info(file_path)
+        info = FFmpegHelper.get_video_info(file_path)
         if not info:
             return False, "无法读取视频信息，文件可能损坏"
 
-        if info.get('width', 0) == 0 or info.get('height', 0) == 0:
+        if info.width == 0 or info.height == 0:
             return False, "视频尺寸无效"
 
-        if info.get('duration', 0) <= 0:
+        if info.duration <= 0:
             return False, "视频时长无效"
 
         return True, ""
 
     @staticmethod
     def validate_split_ratio(ratio: float) -> Tuple[bool, str]:
-        """
-        验证分割比例
-
-        Args:
-            ratio: 分割比例
-
-        Returns:
-            Tuple[bool, str]: (是否有效, 错误信息)
-        """
+        """验证分割比例"""
         if not isinstance(ratio, (int, float)):
             return False, "分割比例必须是数字"
 
@@ -232,15 +224,7 @@ class InputValidator:
 
     @staticmethod
     def validate_scale_percent(percent: int) -> Tuple[bool, str]:
-        """
-        验证缩放百分比
-
-        Args:
-            percent: 缩放百分比
-
-        Returns:
-            Tuple[bool, str]: (是否有效, 错误信息)
-        """
+        """验证缩放百分比"""
         if not isinstance(percent, int):
             return False, "缩放百分比必须是整数"
 
@@ -251,22 +235,11 @@ class InputValidator:
 
     @staticmethod
     def validate_output_directory(dir_path: str) -> Tuple[bool, str]:
-        """
-        验证输出目录
-
-        Args:
-            dir_path: 输出目录路径
-
-        Returns:
-            Tuple[bool, str]: (是否有效, 错误信息)
-        """
-        import os
-
+        """验证输出目录"""
         if not dir_path:
             return False, "输出目录为空"
 
         if not os.path.exists(dir_path):
-            # 尝试创建目录
             try:
                 os.makedirs(dir_path, exist_ok=True)
                 return True, ""
@@ -283,16 +256,7 @@ class InputValidator:
 
     @staticmethod
     def validate_cover_duration(duration: float, video_duration: float) -> Tuple[bool, str]:
-        """
-        验证封面时长
-
-        Args:
-            duration: 封面时长
-            video_duration: 视频总时长
-
-        Returns:
-            Tuple[bool, str]: (是否有效, 错误信息)
-        """
+        """验证封面时长"""
         if not isinstance(duration, (int, float)):
             return False, "封面时长必须是数字"
 

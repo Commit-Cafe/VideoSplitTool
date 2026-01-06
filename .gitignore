@@ -50,9 +50,8 @@ logs/
 *.log
 
 # Project specific - FFmpeg and media files
-release/
 ffmpeg/
-ffmpeg-8.0.1-full_build/
+ffmpeg-*/
 *.zip
 *.mp4
 *.avi
@@ -63,27 +62,17 @@ ffmpeg-8.0.1-full_build/
 test_videos/
 output/
 list/
-model.mp4
+release/
 
-# Development documentation (excluded)
-docs/
-V2.1_COMPLETION_SUMMARY.md
-WEB_VERSION_PLANNING.md
-WEB_ALTERNATIVE_SOLUTIONS.md
-GITEA_SETUP_GUIDE.md
-QUICK_START.md
+# Unused/archived files
+unused/
+web/
+.gitea/
 
-# Temporary scripts (excluded)
-fix_git_large_files.bat
-setup_github.bat
-setup_github_simple.bat
-push_to_github.bat
-push_all.bat
-
-# Keep these important files (don't add them here):
+# Keep these important files:
 # README.md - Project overview
-# RELEASE_NOTES_V2.1.md - User release notes
-# MACOS_USER_GUIDE.md - User guide for macOS
-# build.bat - Build script
-# main.py - Main application
-# *.py - Python source files
+# main.py - Main application entry
+# requirements.txt - Dependencies
+# src/ - Source code
+# docs/ - Documentation
+# .github/ - GitHub workflows

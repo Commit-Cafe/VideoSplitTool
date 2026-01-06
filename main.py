@@ -10,10 +10,19 @@ import threading
 import atexit
 from datetime import datetime
 from PIL import Image, ImageTk
-from utils import check_ffmpeg, extract_frame, get_temp_dir, is_valid_video, get_video_info, format_duration, format_video_info
-from video_processor import VideoProcessor, ProcessResult
-from temp_manager import global_temp_manager, cleanup_on_exit
-from logger import logger, cleanup_old_logs
+from src.core import check_ffmpeg, FFmpegHelper, VideoProcessor, ProcessResult
+from src.utils import get_temp_dir, is_valid_video, format_duration, format_video_info
+from src.utils import global_temp_manager, cleanup_on_exit, logger, cleanup_old_logs
+
+# 兼容旧代码的函数别名
+extract_frame = FFmpegHelper.extract_frame
+
+def get_video_info(video_path):
+    """获取视频信息（兼容性包装，返回字典）"""
+    info = FFmpegHelper.get_video_info(video_path)
+    if info:
+        return info.to_dict()
+    return None
 
 
 class VideoItem:
@@ -434,7 +443,7 @@ class VideoSettingsDialog:
             return None
 
         try:
-            from video_processor import VideoProcessor, get_ffmpeg_path
+            from src.core import get_ffmpeg_path
             import subprocess
 
             temp_dir = get_temp_dir()
@@ -465,7 +474,6 @@ class VideoSettingsDialog:
             split_ratio = self.split_ratio.get()
 
             # 获取视频信息
-            from utils import get_video_info
             template_info = get_video_info(template_video)
             if not template_info:
                 return None
@@ -1463,7 +1471,7 @@ class VideoSplitApp:
             return f"{original_name}_{timestamp}.mp4"
 
     def _start_processing(self):
-        from error_handler import InputValidator
+        from src.core import InputValidator
 
         # 防止重复点击
         if self.is_processing:

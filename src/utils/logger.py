@@ -5,7 +5,16 @@ import logging
 import os
 import sys
 from datetime import datetime
-from utils import get_base_path
+from typing import Optional
+
+
+def get_base_path() -> str:
+    """获取程序基础路径（支持PyInstaller打包）"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        # 开发环境：返回项目根目录
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def setup_logger(name: str = "VideoSplitTool") -> logging.Logger:
@@ -18,13 +27,13 @@ def setup_logger(name: str = "VideoSplitTool") -> logging.Logger:
     Returns:
         logging.Logger: 配置好的日志记录器
     """
-    logger = logging.getLogger(name)
+    log = logging.getLogger(name)
 
     # 避免重复添加handler
-    if logger.handlers:
-        return logger
+    if log.handlers:
+        return log
 
-    logger.setLevel(logging.DEBUG)
+    log.setLevel(logging.DEBUG)
 
     # 创建日志目录
     base_path = get_base_path()
@@ -48,10 +57,10 @@ def setup_logger(name: str = "VideoSplitTool") -> logging.Logger:
     console_formatter = logging.Formatter('%(levelname)s - %(message)s')
     console_handler.setFormatter(console_formatter)
 
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    log.addHandler(file_handler)
+    log.addHandler(console_handler)
 
-    return logger
+    return log
 
 
 def cleanup_old_logs(days: int = 7):
@@ -79,7 +88,6 @@ def cleanup_old_logs(days: int = 7):
                     if file_time < cutoff_time:
                         os.remove(file_path)
                 except OSError as e:
-                    # 文件可能被占用或无权限删除
                     logging.warning(f"无法删除旧日志文件 {filename}: {e}")
     except Exception as e:
         logging.error(f"清理旧日志失败: {e}")
