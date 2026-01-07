@@ -112,7 +112,7 @@ python main.py
 
 ## 更新日志
 
-### V2.2 (
+### V2.2 
 
 **架构重构:**
 - ✅ **分层架构** - 拆分为 models/core/ui/utils 四层

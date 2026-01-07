@@ -2,8 +2,18 @@
 文件操作工具函数
 """
 import os
+import sys
 import tempfile
 from typing import Set
+
+
+def get_base_path() -> str:
+    """获取程序基础路径（支持PyInstaller打包）"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        # 开发环境：返回项目根目录
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 有效视频扩展名
 VALID_VIDEO_EXTENSIONS: Set[str] = {

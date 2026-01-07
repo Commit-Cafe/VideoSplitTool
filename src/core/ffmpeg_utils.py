@@ -4,23 +4,15 @@ FFmpeg 工具类
 """
 import subprocess
 import os
-import sys
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+
+from ..utils.file_utils import get_base_path
 
 
 # FFmpeg 路径缓存
 _ffmpeg_path: Optional[str] = None
 _ffprobe_path: Optional[str] = None
-
-
-def get_base_path() -> str:
-    """获取程序基础路径（支持PyInstaller打包）"""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    else:
-        # 开发环境：返回项目根目录
-        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def get_ffmpeg_path() -> str:

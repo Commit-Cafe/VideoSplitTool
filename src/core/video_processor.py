@@ -23,6 +23,11 @@ class ProcessResult:
     error: str = ""
 
 
+def _make_even(n: int) -> int:
+    """确保数值是偶数（libx264要求宽高必须是偶数）"""
+    return n if n % 2 == 0 else n - 1
+
+
 class VideoProcessor:
     """视频处理器"""
 
@@ -192,6 +197,7 @@ class VideoProcessor:
             # 检查音频状态
             template_has_audio = template_info.has_audio
             target_has_audio = target_info.has_audio
+            logger.debug(f"音频状态: 模板={template_has_audio}, 目标={target_has_audio}, 音频来源={audio_source}")
 
             self._report_progress(0.1, "构建处理命令")
 
@@ -235,7 +241,7 @@ class VideoProcessor:
             # 音频映射
             has_audio_output = False
             if audio_source == "none":
-                pass
+                logger.debug("音频模式: 静音，不映射音频")
             elif audio_source == "custom" and custom_audio_path:
                 cmd.extend(['-map', '2:a'])
                 cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
@@ -341,6 +347,7 @@ class VideoProcessor:
             final_output = os.path.join(temp_dir, f"final_{unique_id}.mp4")
             ffmpeg = get_ffmpeg_path()
             main_has_audio = FFmpegHelper.check_has_audio(video_path)
+            logger.debug(f"封面处理: 主视频音频状态={main_has_audio}, video_path={video_path}")
 
             if main_has_audio:
                 cmd = [
@@ -437,13 +444,16 @@ class VideoProcessor:
 
         swap_order = (position_order == "list_first")
         scale_factor = target_scale_percent / 100.0
-        target_scaled_width = int(out_width * scale_factor)
-        target_scaled_height = int(out_height * scale_factor)
+        # 确保所有尺寸是偶数（libx264要求）
+        target_scaled_width = _make_even(int(out_width * scale_factor))
+        target_scaled_height = _make_even(int(out_height * scale_factor))
+        out_width = _make_even(out_width)
+        out_height = _make_even(out_height)
 
         if split_mode == self.SPLIT_HORIZONTAL:
-            template_part_a_width = int(out_width * split_ratio)
+            template_part_a_width = _make_even(int(out_width * split_ratio))
             template_part_b_width = out_width - template_part_a_width
-            target_part_c_width = int(target_scaled_width * target_split_ratio)
+            target_part_c_width = _make_even(int(target_scaled_width * target_split_ratio))
             target_part_d_width = target_scaled_width - target_part_c_width
 
             video_filter = self._build_horizontal_filter(
@@ -454,9 +464,9 @@ class VideoProcessor:
                 target_part_c_width, target_part_d_width
             )
         else:
-            template_part_a_height = int(out_height * split_ratio)
+            template_part_a_height = _make_even(int(out_height * split_ratio))
             template_part_b_height = out_height - template_part_a_height
-            target_part_c_height = int(target_scaled_height * target_split_ratio)
+            target_part_c_height = _make_even(int(target_scaled_height * target_split_ratio))
             target_part_d_height = target_scaled_height - target_part_c_height
 
             video_filter = self._build_vertical_filter(

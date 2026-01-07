@@ -50,14 +50,36 @@ class ErrorDiagnostics:
                 ]
             )
 
-        # 通用的音频流错误
-        if "audio" in stderr_lower and ("stream" in stderr_lower or "codec" in stderr_lower):
+        # 通用的音频流错误 - 需要更具体的匹配，避免误报
+        # 只匹配实际的音频处理错误，不匹配FFmpeg信息输出中的"audio"/"stream"
+        audio_error_patterns = [
+            "audio encoder",
+            "audio codec not found",
+            "audio stream error",
+            "audio encoding failed",
+            "no audio stream",
+            "audio filter",
+            "[audio]",
+            "audio: invalid"
+        ]
+        if any(pattern in stderr_lower for pattern in audio_error_patterns):
             return (
                 "音频处理失败",
                 [
                     "检查视频是否有音频轨道",
                     "尝试选择'静音'选项",
                     "检查音频编解码器是否支持"
+                ]
+            )
+
+        # 视频尺寸不是偶数（libx264要求）
+        if "not divisible by 2" in stderr_lower or "divisible by 2" in stderr_lower:
+            return (
+                "视频尺寸计算错误（宽高必须是偶数）",
+                [
+                    "这是程序内部计算问题，请尝试调整分割比例",
+                    "使用50%分割比例通常能避免此问题",
+                    "如果问题持续，请反馈给开发者"
                 ]
             )
 
