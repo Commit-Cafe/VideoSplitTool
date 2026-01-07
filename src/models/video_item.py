@@ -31,6 +31,7 @@ class VideoItem:
         name: 视频文件名
         split_ratio: 分割比例 (0.1-0.9)
         scale_percent: 缩放百分比 (50-200)
+        output_ratio: 输出比例 - 上/左部分在输出中占的比例 (0.1-0.9)，None表示跟随split_ratio
         cover_type: 封面类型
         cover_frame_time: 封面帧时间点(秒)
         cover_image_path: 外部封面图片路径
@@ -41,6 +42,7 @@ class VideoItem:
     name: str = field(init=False)
     split_ratio: float = 0.5
     scale_percent: int = 100
+    output_ratio: Optional[float] = None  # None表示跟随split_ratio
     cover_type: str = "none"
     cover_frame_time: float = 0.0
     cover_image_path: Optional[str] = None
@@ -50,6 +52,10 @@ class VideoItem:
     def __post_init__(self):
         """初始化后处理"""
         self.name = os.path.basename(self.path)
+
+    def get_output_ratio(self) -> float:
+        """获取实际输出比例，如果未设置则返回分割比例"""
+        return self.output_ratio if self.output_ratio is not None else self.split_ratio
 
     def get_summary(self) -> tuple:
         """
@@ -71,6 +77,7 @@ class VideoItem:
             'path': self.path,
             'split_ratio': self.split_ratio,
             'scale_percent': self.scale_percent,
+            'output_ratio': self.output_ratio,
             'cover_type': self.cover_type,
             'cover_frame_time': self.cover_frame_time,
             'cover_image_path': self.cover_image_path,
@@ -81,16 +88,18 @@ class VideoItem:
     @classmethod
     def from_dict(cls, data: dict) -> 'VideoItem':
         """从字典创建实例"""
-        return cls(
+        item = cls(
             path=data['path'],
             split_ratio=data.get('split_ratio', 0.5),
             scale_percent=data.get('scale_percent', 100),
+            output_ratio=data.get('output_ratio'),
             cover_type=data.get('cover_type', 'none'),
             cover_frame_time=data.get('cover_frame_time', 0.0),
             cover_image_path=data.get('cover_image_path'),
             cover_duration=data.get('cover_duration', 1.0),
             cover_frame_source=data.get('cover_frame_source', 'template')
         )
+        return item
 
     def validate(self) -> tuple:
         """
@@ -107,6 +116,9 @@ class VideoItem:
 
         if not 50 <= self.scale_percent <= 200:
             return False, f"缩放比例超出范围: {self.scale_percent}"
+
+        if self.output_ratio is not None and not 0.1 <= self.output_ratio <= 0.9:
+            return False, f"输出比例超出范围: {self.output_ratio}"
 
         if self.cover_type == CoverType.IMAGE.value and self.cover_image_path:
             if not os.path.exists(self.cover_image_path):

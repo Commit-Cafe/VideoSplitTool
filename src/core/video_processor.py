@@ -28,6 +28,38 @@ def _make_even(n: int) -> int:
     return n if n % 2 == 0 else n - 1
 
 
+def _build_scale_filter(width: int, height: int, mode: str = "stretch") -> str:
+    """
+    根据缩放模式构建FFmpeg scale滤镜字符串
+
+    Args:
+        width: 目标宽度
+        height: 目标高度
+        mode: 缩放模式
+            - "stretch": 拉伸填满（可能变形）
+            - "fill": 填充裁切（保持比例，裁剪超出部分）
+            - "fit": 适应留黑边（保持比例，添加黑边）
+
+    Returns:
+        FFmpeg scale滤镜字符串
+    """
+    if mode == "fill":
+        # 填充模式：放大到覆盖目标区域，然后居中裁剪
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}"
+        )
+    elif mode == "fit":
+        # 适应模式：缩小到适应目标区域，然后居中添加黑边
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
+        )
+    else:
+        # 拉伸模式（默认）：直接拉伸到目标尺寸
+        return f"scale={width}:{height}:force_original_aspect_ratio=disable"
+
+
 class VideoProcessor:
     """视频处理器"""
 
@@ -121,7 +153,11 @@ class VideoProcessor:
         custom_audio_path: str = None,
         output_width: int = None,
         output_height: int = None,
-        scale_mode: str = None
+        scale_mode: str = None,
+        output_ratio: float = None,
+        duration_mode: str = "template",
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit"
     ) -> ProcessResult:
         """
         处理视频：分割并拼接
@@ -145,7 +181,11 @@ class VideoProcessor:
             custom_audio_path: 自定义音频文件路径
             output_width: 自定义输出宽度
             output_height: 自定义输出高度
-            scale_mode: 缩放模式 (fit/fill/stretch)
+            scale_mode: 缩放模式 (fit/fill/stretch) - 通用模式，如未指定独立模式则使用此值
+            output_ratio: 输出比例 - 上/左部分在输出中占的比例 (0.1-0.9)，None表示跟随split_ratio
+            duration_mode: 输出时长模式 (template/list)
+            template_scale_mode: 模板视频缩放模式 (fit/fill/stretch)
+            list_scale_mode: 列表视频缩放模式 (fit/fill/stretch)
 
         Returns:
             ProcessResult: 处理结果
@@ -180,7 +220,7 @@ class VideoProcessor:
                 return ProcessResult(False, error="目标视频尺寸无效")
 
             # 确定输出尺寸
-            if output_width and output_height:
+            if output_width is not None and output_height is not None and output_width > 0 and output_height > 0:
                 out_width = output_width
                 out_height = output_height
                 logger.info(f"使用自定义输出尺寸: {out_width}x{out_height}")
@@ -189,8 +229,14 @@ class VideoProcessor:
                 out_height = template_info.height
                 logger.info(f"使用模板视频尺寸: {out_width}x{out_height}")
 
-            # 确定较长的时长
-            max_duration = max(template_info.duration, target_info.duration)
+            # 根据 duration_mode 确定输出时长
+            if duration_mode == "list":
+                max_duration = target_info.duration
+                logger.info(f"使用列表视频时长: {max_duration:.2f}秒")
+            else:
+                max_duration = template_info.duration
+                logger.info(f"使用模板视频时长: {max_duration:.2f}秒")
+
             if max_duration <= 0:
                 return ProcessResult(False, error="视频时长无效")
 
@@ -208,6 +254,8 @@ class VideoProcessor:
 
             # 构建filter_complex
             try:
+                # 如果没有指定 output_ratio，则使用 split_ratio
+                actual_output_ratio = output_ratio if output_ratio is not None else split_ratio
                 filter_complex = self._build_filter_complex(
                     split_mode, merge_mode,
                     split_ratio, target_split_ratio,
@@ -217,7 +265,10 @@ class VideoProcessor:
                     target_scale_percent,
                     position_order,
                     audio_source,
-                    scale_mode or "fit"
+                    scale_mode or "fit",
+                    actual_output_ratio,
+                    template_scale_mode,
+                    list_scale_mode
                 )
             except ValueError as e:
                 return ProcessResult(False, error=str(e))
@@ -350,6 +401,10 @@ class VideoProcessor:
             logger.debug(f"封面处理: 主视频音频状态={main_has_audio}, video_path={video_path}")
 
             if main_has_audio:
+                # 使用标准采样率44100Hz（最常见的采样率）
+                sample_rate = 44100
+                logger.debug(f"封面处理: 生成静音封面音频，采样率={sample_rate}Hz")
+
                 cmd = [
                     ffmpeg, '-y',
                     '-i', cover_video_path,
@@ -358,14 +413,13 @@ class VideoProcessor:
                     f'[0:v]scale={width}:{height}:force_original_aspect_ratio=disable,setsar=1[v0];'
                     f'[1:v]scale={width}:{height}:force_original_aspect_ratio=disable,setsar=1[v1];'
                     f'[v0][v1]concat=n=2:v=1:a=0[outv];'
-                    f'anullsrc=channel_layout=stereo:sample_rate=44100:duration={cover_duration}[a0];'
+                    f'anullsrc=channel_layout=stereo:sample_rate={sample_rate}:duration={cover_duration}[a0];'
                     f'[a0][1:a]concat=n=2:v=0:a=1[outa]',
                     '-map', '[outv]',
                     '-map', '[outa]',
                     '-c:v', 'libx264',
                     '-c:a', 'aac',
                     '-b:a', '128k',
-                    '-shortest',
                     '-preset', 'medium',
                     '-crf', '23',
                     final_output
@@ -421,10 +475,19 @@ class VideoProcessor:
         target_scale_percent: int = 100,
         position_order: str = "template_first",
         audio_source: str = "template",
-        scale_mode: str = "fit"
+        scale_mode: str = "fit",
+        output_ratio: float = None,
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit"
     ) -> str:
-        """构建FFmpeg filter_complex字符串"""
-        logger.debug(f"缩放模式: {scale_mode}")
+        """构建FFmpeg filter_complex字符串
+
+        Args:
+            output_ratio: 输出比例 - 上/左部分在输出中占的比例，None表示跟随split_ratio
+            template_scale_mode: 模板视频缩放模式 (fit/fill/stretch)
+            list_scale_mode: 列表视频缩放模式 (fit/fill/stretch)
+        """
+        logger.debug(f"缩放模式: 模板={template_scale_mode}, 列表={list_scale_mode}")
 
         # 音频filter
         audio_filter = None
@@ -450,9 +513,14 @@ class VideoProcessor:
         out_width = _make_even(out_width)
         out_height = _make_even(out_height)
 
+        # 使用 output_ratio 决定输出中各部分的大小，如果未指定则使用 split_ratio
+        actual_output_ratio = output_ratio if output_ratio is not None else split_ratio
+
         if split_mode == self.SPLIT_HORIZONTAL:
-            template_part_a_width = _make_even(int(out_width * split_ratio))
+            # 输出中各部分的宽度（由 output_ratio 决定）
+            template_part_a_width = _make_even(int(out_width * actual_output_ratio))
             template_part_b_width = out_width - template_part_a_width
+            # 从列表视频裁剪的区域（由 target_split_ratio 决定）
             target_part_c_width = _make_even(int(target_scaled_width * target_split_ratio))
             target_part_d_width = target_scaled_width - target_part_c_width
 
@@ -461,11 +529,14 @@ class VideoProcessor:
                 out_width, out_height,
                 template_part_a_width, template_part_b_width,
                 target_scaled_width, target_scaled_height,
-                target_part_c_width, target_part_d_width
+                target_part_c_width, target_part_d_width,
+                template_scale_mode, list_scale_mode
             )
         else:
-            template_part_a_height = _make_even(int(out_height * split_ratio))
+            # 输出中各部分的高度（由 output_ratio 决定）
+            template_part_a_height = _make_even(int(out_height * actual_output_ratio))
             template_part_b_height = out_height - template_part_a_height
+            # 从列表视频裁剪的区域（由 target_split_ratio 决定）
             target_part_c_height = _make_even(int(target_scaled_height * target_split_ratio))
             target_part_d_height = target_scaled_height - target_part_c_height
 
@@ -474,7 +545,8 @@ class VideoProcessor:
                 out_width, out_height,
                 template_part_a_height, template_part_b_height,
                 target_scaled_width, target_scaled_height,
-                target_part_c_height, target_part_d_height
+                target_part_c_height, target_part_d_height,
+                template_scale_mode, list_scale_mode
             )
 
         if audio_filter:
@@ -486,83 +558,107 @@ class VideoProcessor:
         out_width: int, out_height: int,
         part_a_width: int, part_b_width: int,
         target_width: int, target_height: int,
-        part_c_width: int, part_d_width: int
+        part_c_width: int, part_d_width: int,
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit"
     ) -> str:
         """构建水平分割滤镜"""
+        # 根据缩放模式生成最终缩放滤镜
+        t_scale_left = _build_scale_filter(part_a_width, out_height, template_scale_mode)
+        t_scale_right = _build_scale_filter(part_b_width, out_height, template_scale_mode)
+        l_scale_left = _build_scale_filter(part_a_width, out_height, list_scale_mode)
+        l_scale_right = _build_scale_filter(part_b_width, out_height, list_scale_mode)
+
         if merge_mode == self.MERGE_A_C:
             if swap_order:
+                # 列表C在左，模板A在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_c_width}:{target_height}:0:0,"
-                    f"scale={part_a_width}:{out_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_left}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0[va];"
+                    f"crop={part_a_width}:{out_height}:0:0,"
+                    f"{t_scale_right}[va];"
                     f"[vc][va]hstack=inputs=2[outv]"
                 )
             else:
+                # 模板A在左，列表C在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_a_width}:{out_height}:0:0[va];"
+                    f"crop={part_a_width}:{out_height}:0:0,"
+                    f"{t_scale_left}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_c_width}:{target_height}:0:0,"
-                    f"scale={part_b_width}:{out_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_right}[vc];"
                     f"[va][vc]hstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_A_D:
             if swap_order:
+                # 列表D在左，模板A在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
-                    f"scale={part_a_width}:{out_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_left}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0[va];"
+                    f"crop={part_a_width}:{out_height}:0:0,"
+                    f"{t_scale_right}[va];"
                     f"[vd][va]hstack=inputs=2[outv]"
                 )
             else:
+                # 模板A在左，列表D在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_a_width}:{out_height}:0:0[va];"
+                    f"crop={part_a_width}:{out_height}:0:0,"
+                    f"{t_scale_left}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
-                    f"scale={part_b_width}:{out_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_right}[vd];"
                     f"[va][vd]hstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_B_C:
             if swap_order:
+                # 列表C在左，模板B在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_c_width}:{target_height}:0:0,"
-                    f"scale={part_b_width}:{out_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_left}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_a_width}:{out_height}:0:0[vb];"
+                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"{t_scale_right}[vb];"
                     f"[vc][vb]hstack=inputs=2[outv]"
                 )
             else:
+                # 模板B在左，列表C在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0[vb];"
+                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"{t_scale_left}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_c_width}:{target_height}:0:0,"
-                    f"scale={part_a_width}:{out_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_right}[vc];"
                     f"[vb][vc]hstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_B_D:
             if swap_order:
+                # 列表D在左，模板B在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
-                    f"scale={part_b_width}:{out_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_left}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_a_width}:{out_height}:0:0[vb];"
+                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"{t_scale_right}[vb];"
                     f"[vd][vb]hstack=inputs=2[outv]"
                 )
             else:
+                # 模板B在左，列表D在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0[vb];"
+                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"{t_scale_left}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
-                    f"scale={part_a_width}:{out_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_right}[vd];"
                     f"[vb][vd]hstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_GRID:
@@ -589,83 +685,107 @@ class VideoProcessor:
         out_width: int, out_height: int,
         part_a_height: int, part_b_height: int,
         target_width: int, target_height: int,
-        part_c_height: int, part_d_height: int
+        part_c_height: int, part_d_height: int,
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit"
     ) -> str:
         """构建垂直分割滤镜"""
+        # 根据缩放模式生成最终缩放滤镜
+        t_scale_top = _build_scale_filter(out_width, part_a_height, template_scale_mode)
+        t_scale_bottom = _build_scale_filter(out_width, part_b_height, template_scale_mode)
+        l_scale_top = _build_scale_filter(out_width, part_a_height, list_scale_mode)
+        l_scale_bottom = _build_scale_filter(out_width, part_b_height, list_scale_mode)
+
         if merge_mode == self.MERGE_A_C:
             if swap_order:
+                # 列表C在上，模板A在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_c_height}:0:0,"
-                    f"scale={out_width}:{part_a_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_top}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height}[va];"
+                    f"crop={out_width}:{part_a_height}:0:0,"
+                    f"{t_scale_bottom}[va];"
                     f"[vc][va]vstack=inputs=2[outv]"
                 )
             else:
+                # 模板A在上，列表C在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_a_height}:0:0[va];"
+                    f"crop={out_width}:{part_a_height}:0:0,"
+                    f"{t_scale_top}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_c_height}:0:0,"
-                    f"scale={out_width}:{part_b_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_bottom}[vc];"
                     f"[va][vc]vstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_A_D:
             if swap_order:
+                # 列表D在上，模板A在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
-                    f"scale={out_width}:{part_a_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_top}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height}[va];"
+                    f"crop={out_width}:{part_a_height}:0:0,"
+                    f"{t_scale_bottom}[va];"
                     f"[vd][va]vstack=inputs=2[outv]"
                 )
             else:
+                # 模板A在上，列表D在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_a_height}:0:0[va];"
+                    f"crop={out_width}:{part_a_height}:0:0,"
+                    f"{t_scale_top}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
-                    f"scale={out_width}:{part_b_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_bottom}[vd];"
                     f"[va][vd]vstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_B_C:
             if swap_order:
+                # 列表C在上，模板B在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_c_height}:0:0,"
-                    f"scale={out_width}:{part_b_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_top}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_a_height}:0:0[vb];"
+                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"{t_scale_bottom}[vb];"
                     f"[vc][vb]vstack=inputs=2[outv]"
                 )
             else:
+                # 模板B在上，列表C在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height}[vb];"
+                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"{t_scale_top}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_c_height}:0:0,"
-                    f"scale={out_width}:{part_a_height}:force_original_aspect_ratio=disable[vc];"
+                    f"{l_scale_bottom}[vc];"
                     f"[vb][vc]vstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_B_D:
             if swap_order:
+                # 列表D在上，模板B在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
-                    f"scale={out_width}:{part_b_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_top}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_a_height}:0:0[vb];"
+                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"{t_scale_bottom}[vb];"
                     f"[vd][vb]vstack=inputs=2[outv]"
                 )
             else:
+                # 模板B在上，列表D在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height}[vb];"
+                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"{t_scale_top}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
-                    f"scale={out_width}:{part_a_height}:force_original_aspect_ratio=disable[vd];"
+                    f"{l_scale_bottom}[vd];"
                     f"[vb][vd]vstack=inputs=2[outv]"
                 )
         elif merge_mode == self.MERGE_GRID:
