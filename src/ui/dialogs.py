@@ -3,13 +3,11 @@
 包含视频设置对话框等
 """
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk
 import os
-import subprocess
 from PIL import Image, ImageTk
 from typing import Optional
 
-from ..core.ffmpeg_utils import FFmpegHelper, get_ffmpeg_path
 from ..utils.file_utils import get_temp_dir
 from ..utils.format_utils import format_video_info
 from ..utils.logger import logger

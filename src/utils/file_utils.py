@@ -1,6 +1,7 @@
 """
 文件操作工具函数
 """
+import logging
 import os
 import sys
 import tempfile
@@ -40,9 +41,9 @@ def clean_temp_files(temp_dir: str = None):
                 if os.path.isfile(file_path):
                     os.remove(file_path)
             except OSError as e:
-                print(f"无法删除临时文件 {file}: {e}")
+                logging.warning(f"无法删除临时文件 {file}: {e}")
             except Exception as e:
-                print(f"删除临时文件时发生错误 {file}: {e}")
+                logging.warning(f"删除临时文件时发生错误 {file}: {e}")
 
 
 def is_valid_video(file_path: str) -> bool:

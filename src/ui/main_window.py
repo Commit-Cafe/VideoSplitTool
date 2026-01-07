@@ -70,7 +70,6 @@ class VideoSplitApp:
         self.global_cover_image_path = tk.StringVar()
 
         # 预览相关
-        self.preview_list_index = tk.IntVar(value=0)  # 当前预览的列表视频索引
         self.merge_preview_image = None  # PIL Image对象
         self.merge_preview_photo = None  # PhotoImage对象
 
@@ -710,10 +709,6 @@ class VideoSplitApp:
         c = self.use_part_c.get()
         d = self.use_part_d.get()
 
-        mode = self.split_mode.get()
-        a_name = "左" if mode == "horizontal" else "上"
-        b_name = "右" if mode == "horizontal" else "下"
-
         template_parts = []
         list_parts = []
         if a:
@@ -726,6 +721,7 @@ class VideoSplitApp:
             list_parts.append("D")
 
         is_template_first = self.position_order.get() == "template_first"
+        mode = self.split_mode.get()
 
         if mode == "horizontal":
             first_side = "左"
@@ -1027,7 +1023,6 @@ class VideoSplitApp:
         template_path = self.template_video.get()
         video_w, video_h = 1920, 1080  # 默认16:9
         if template_path:
-            from .compat import get_video_info
             info = get_video_info(template_path)
             if info and info.get('width', 0) > 0 and info.get('height', 0) > 0:
                 video_w = info['width']
@@ -1483,14 +1478,12 @@ class VideoSplitApp:
         """根据封面类型更新帧时间滑块范围"""
         max_duration = 100  # 默认值
         if cover_type == "template" and self.template_video.get():
-            from .compat import get_video_info
             info = get_video_info(self.template_video.get())
             if info:
                 max_duration = info.get('duration', 100)
         elif cover_type == "list" and self.video_items:
             idx = self.preview_video_combo.current()
             if 0 <= idx < len(self.video_items):
-                from .compat import get_video_info
                 info = get_video_info(self.video_items[idx].path)
                 if info:
                     max_duration = info.get('duration', 100)
@@ -1498,7 +1491,6 @@ class VideoSplitApp:
             # 对于拼接帧，使用较短的那个视频时长
             max_duration = 100
             if self.template_video.get():
-                from .compat import get_video_info
                 info = get_video_info(self.template_video.get())
                 if info:
                     max_duration = info.get('duration', 100)

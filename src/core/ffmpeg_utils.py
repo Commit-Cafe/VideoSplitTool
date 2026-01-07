@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 from ..utils.file_utils import get_base_path
+from ..utils.logger import logger
 
 
 # FFmpeg 路径缓存
@@ -159,7 +160,7 @@ class FFmpegHelper:
                 has_audio=has_audio
             )
         except Exception as e:
-            print(f"获取视频信息失败: {e}")
+            logger.warning(f"获取视频信息失败: {e}")
             return None
 
     @staticmethod
@@ -217,7 +218,7 @@ class FFmpegHelper:
             )
             return result.returncode == 0 and os.path.exists(output_path)
         except Exception as e:
-            print(f"提取帧失败: {e}")
+            logger.warning(f"提取帧失败: {e}")
             return False
 
     @staticmethod
@@ -262,7 +263,7 @@ class FFmpegHelper:
             )
             return result.returncode == 0 and os.path.exists(output_path)
         except Exception as e:
-            print(f"图片转视频失败: {e}")
+            logger.warning(f"图片转视频失败: {e}")
             return False
 
     @staticmethod
