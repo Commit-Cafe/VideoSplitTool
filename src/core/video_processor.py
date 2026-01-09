@@ -157,7 +157,13 @@ class VideoProcessor:
         output_ratio: float = None,
         duration_mode: str = "template",
         template_scale_mode: str = "fit",
-        list_scale_mode: str = "fit"
+        list_scale_mode: str = "fit",
+        template_volume: int = 100,
+        list_volume: int = 100,
+        custom_volume: int = 100,
+        divider_mask_path: str = None,
+        divider_color: str = "#FFFFFF",
+        divider_width: int = 0
     ) -> ProcessResult:
         """
         处理视频：分割并拼接
@@ -186,6 +192,9 @@ class VideoProcessor:
             duration_mode: 输出时长模式 (template/list)
             template_scale_mode: 模板视频缩放模式 (fit/fill/stretch)
             list_scale_mode: 列表视频缩放模式 (fit/fill/stretch)
+            template_volume: 模板音频音量百分比 (0-200)
+            list_volume: 列表音频音量百分比 (0-200)
+            custom_volume: 自定义音频音量百分比 (0-200)
 
         Returns:
             ProcessResult: 处理结果
@@ -256,20 +265,41 @@ class VideoProcessor:
             try:
                 # 如果没有指定 output_ratio，则使用 split_ratio
                 actual_output_ratio = output_ratio if output_ratio is not None else split_ratio
-                filter_complex = self._build_filter_complex(
-                    split_mode, merge_mode,
-                    split_ratio, target_split_ratio,
-                    out_width, out_height,
-                    template_info.duration, target_info.duration,
-                    template_has_audio, target_has_audio,
-                    target_scale_percent,
-                    position_order,
-                    audio_source,
-                    scale_mode or "fit",
-                    actual_output_ratio,
-                    template_scale_mode,
-                    list_scale_mode
-                )
+
+                # 检查是否使用曲线蒙版
+                use_mask = divider_mask_path and os.path.exists(divider_mask_path)
+
+                if use_mask:
+                    logger.info(f"使用曲线蒙版: {divider_mask_path}")
+                    filter_complex = self._build_mask_filter_complex(
+                        out_width, out_height,
+                        template_has_audio, target_has_audio,
+                        position_order,
+                        audio_source,
+                        template_scale_mode,
+                        list_scale_mode,
+                        template_volume,
+                        list_volume,
+                        divider_color,
+                        divider_width
+                    )
+                else:
+                    filter_complex = self._build_filter_complex(
+                        split_mode, merge_mode,
+                        split_ratio, target_split_ratio,
+                        out_width, out_height,
+                        template_info.duration, target_info.duration,
+                        template_has_audio, target_has_audio,
+                        target_scale_percent,
+                        position_order,
+                        audio_source,
+                        scale_mode or "fit",
+                        actual_output_ratio,
+                        template_scale_mode,
+                        list_scale_mode,
+                        template_volume,
+                        list_volume
+                    )
             except ValueError as e:
                 return ProcessResult(False, error=str(e))
 
@@ -281,8 +311,18 @@ class VideoProcessor:
                 '-stream_loop', '-1', '-i', target_video,
             ]
 
+            # 如果使用蒙版，添加蒙版图片作为输入
+            if use_mask:
+                cmd.extend(['-i', divider_mask_path])
+
             if audio_source == "custom" and custom_audio_path:
                 cmd.extend(['-stream_loop', '-1', '-i', custom_audio_path])
+
+            # 如果是自定义音频，添加音量滤镜
+            if audio_source == "custom" and custom_audio_path:
+                custom_vol = custom_volume / 100.0
+                custom_audio_filter = f";[2:a]volume={custom_vol}[outa]"
+                filter_complex = filter_complex + custom_audio_filter
 
             cmd.extend([
                 '-filter_complex', filter_complex,
@@ -294,7 +334,7 @@ class VideoProcessor:
             if audio_source == "none":
                 logger.debug("音频模式: 静音，不映射音频")
             elif audio_source == "custom" and custom_audio_path:
-                cmd.extend(['-map', '2:a'])
+                cmd.extend(['-map', '[outa]'])
                 cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
                 has_audio_output = True
             elif audio_source == "template" and template_has_audio:
@@ -478,7 +518,9 @@ class VideoProcessor:
         scale_mode: str = "fit",
         output_ratio: float = None,
         template_scale_mode: str = "fit",
-        list_scale_mode: str = "fit"
+        list_scale_mode: str = "fit",
+        template_volume: int = 100,
+        list_volume: int = 100
     ) -> str:
         """构建FFmpeg filter_complex字符串
 
@@ -486,24 +528,31 @@ class VideoProcessor:
             output_ratio: 输出比例 - 上/左部分在输出中占的比例，None表示跟随split_ratio
             template_scale_mode: 模板视频缩放模式 (fit/fill/stretch)
             list_scale_mode: 列表视频缩放模式 (fit/fill/stretch)
+            template_volume: 模板音频音量百分比 (0-200)
+            list_volume: 列表音频音量百分比 (0-200)
         """
         logger.debug(f"缩放模式: 模板={template_scale_mode}, 列表={list_scale_mode}")
+        logger.debug(f"音量设置: 模板={template_volume}%, 列表={list_volume}%")
 
-        # 音频filter
+        # 计算音量倍数
+        template_vol = template_volume / 100.0
+        list_vol = list_volume / 100.0
+
+        # 音频filter（带音量控制）
         audio_filter = None
         if audio_source == "mix":
             if template_has_audio and target_has_audio:
-                audio_filter = "[0:a][1:a]amix=inputs=2:duration=longest[outa]"
+                audio_filter = f"[0:a]volume={template_vol}[a0];[1:a]volume={list_vol}[a1];[a0][a1]amix=inputs=2:duration=longest[outa]"
             elif template_has_audio:
-                audio_filter = "[0:a]acopy[outa]"
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
             elif target_has_audio:
-                audio_filter = "[1:a]acopy[outa]"
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
         elif audio_source == "template":
             if template_has_audio:
-                audio_filter = "[0:a]acopy[outa]"
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
         elif audio_source == "list":
             if target_has_audio:
-                audio_filter = "[1:a]acopy[outa]"
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
 
         swap_order = (position_order == "list_first")
         scale_factor = target_scale_percent / 100.0
@@ -547,6 +596,119 @@ class VideoProcessor:
                 target_scaled_width, target_scaled_height,
                 target_part_c_height, target_part_d_height,
                 template_scale_mode, list_scale_mode
+            )
+
+        if audio_filter:
+            return f"{video_filter};{audio_filter}"
+        return video_filter
+
+    def _build_mask_filter_complex(
+        self,
+        out_width: int,
+        out_height: int,
+        template_has_audio: bool,
+        target_has_audio: bool,
+        position_order: str,
+        audio_source: str,
+        template_scale_mode: str,
+        list_scale_mode: str,
+        template_volume: int,
+        list_volume: int,
+        divider_color: str = "#FFFFFF",
+        divider_width: int = 0
+    ) -> str:
+        """构建基于蒙版的视频合成滤镜
+
+        使用蒙版图片将两个视频混合，实现曲线分界线效果。
+        蒙版中白色区域显示第一个视频，黑色区域显示第二个视频。
+
+        Args:
+            out_width: 输出宽度
+            out_height: 输出高度
+            template_has_audio: 模板是否有音频
+            target_has_audio: 目标是否有音频
+            position_order: 位置顺序
+            audio_source: 音频来源
+            template_scale_mode: 模板缩放模式
+            list_scale_mode: 列表缩放模式
+            template_volume: 模板音量
+            list_volume: 列表音量
+            divider_color: 分界线颜色
+            divider_width: 分界线宽度
+        """
+        template_vol = template_volume / 100.0
+        list_vol = list_volume / 100.0
+
+        # 音频filter
+        audio_filter = None
+        if audio_source == "mix":
+            if template_has_audio and target_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[a0];[1:a]volume={list_vol}[a1];[a0][a1]amix=inputs=2:duration=longest[outa]"
+            elif template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+            elif target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+        elif audio_source == "template":
+            if template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+        elif audio_source == "list":
+            if target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+
+        # 确定哪个视频在前景（通过蒙版显示），哪个在背景
+        swap_order = (position_order == "list_first")
+
+        # 构建缩放滤镜
+        template_scale = _build_scale_filter(out_width, out_height, template_scale_mode)
+        list_scale = _build_scale_filter(out_width, out_height, list_scale_mode)
+
+        if swap_order:
+            # 列表视频在前景（白色区域），模板视频在背景
+            fg_input = "1:v"
+            bg_input = "0:v"
+            fg_scale = list_scale
+            bg_scale = template_scale
+        else:
+            # 模板视频在前景（白色区域），列表视频在背景
+            fg_input = "0:v"
+            bg_input = "1:v"
+            fg_scale = template_scale
+            bg_scale = list_scale
+
+        # 视频滤镜：
+        # 1. 缩放两个视频到输出尺寸
+        # 2. 将蒙版缩放到输出尺寸并转换为alpha通道
+        # 3. 使用alphamerge将蒙版应用到前景视频
+        # 4. 使用overlay将前景视频叠加到背景视频上
+
+        # 如果有分界线宽度，需要在蒙版边缘绘制线条
+        if divider_width > 0:
+            # 使用geq滤镜扩展蒙版边缘来创建分界线效果
+            # 先检测边缘，然后用颜色填充
+            # 注意：split后原始标签被消费，需要分成3份用于不同用途
+            video_filter = (
+                f"[{fg_input}]{fg_scale}[fg];"
+                f"[{bg_input}]{bg_scale}[bg];"
+                # 缩放蒙版并分成3份：用于边缘检测(2份)和alphamerge(1份)
+                f"[2:v]scale={out_width}:{out_height},format=gray,split=3[mask1][mask2][mask3];"
+                # 创建分界线：通过膨胀和腐蚀检测边缘
+                f"[mask1]erosion=threshold0=128:threshold1=128:threshold2=128:threshold3=128[eroded];"
+                f"[mask2][eroded]blend=all_expr='if(gt(A,B),255,0)'[edge];"
+                # 创建彩色分界线
+                f"color=c={divider_color}:s={out_width}x{out_height}[line_color];"
+                f"[line_color][edge]alphamerge[line];"
+                # 使用mask3进行视频合并
+                f"[fg][mask3]alphamerge[fg_alpha];"
+                f"[bg][fg_alpha]overlay=0:0[merged];"
+                f"[merged][line]overlay=0:0[outv]"
+            )
+        else:
+            video_filter = (
+                f"[{fg_input}]{fg_scale}[fg];"
+                f"[{bg_input}]{bg_scale}[bg];"
+                f"[2:v]scale={out_width}:{out_height},format=gray[mask];"
+                f"[fg][mask]alphamerge[fg_alpha];"
+                f"[bg][fg_alpha]overlay=0:0[outv]"
             )
 
         if audio_filter:

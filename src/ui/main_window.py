@@ -5,26 +5,36 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
-import subprocess
-import threading
 from datetime import datetime
-from PIL import Image, ImageTk
 from typing import List
 
 from ..models.video_item import VideoItem
 from ..core.video_processor import VideoProcessor
-from ..core.ffmpeg_utils import FFmpegHelper, check_ffmpeg
-from ..core.error_handler import InputValidator
-from ..utils.logger import logger, cleanup_old_logs
-from ..utils.temp_manager import global_temp_manager, cleanup_on_exit
-from ..utils.file_utils import get_temp_dir, is_valid_video
-from ..utils.format_utils import format_video_info
+from ..core.ffmpeg_utils import check_ffmpeg
+from ..utils.logger import logger
+from ..utils.file_utils import is_valid_video
 from .dialogs import VideoSettingsDialog
 from .widgets import ScrollableFrame
-from .compat import get_video_info, extract_frame
+
+# 导入功能 Mixins
+from .mixins import (
+    DividerMixin,
+    PreviewMixin,
+    DiagramMixin,
+    CoverMixin,
+    AudioMixin,
+    ProcessingMixin,
+)
 
 
-class VideoSplitApp:
+class VideoSplitApp(
+    DividerMixin,
+    PreviewMixin,
+    DiagramMixin,
+    CoverMixin,
+    AudioMixin,
+    ProcessingMixin
+):
     """视频分割拼接应用 V2.2"""
 
     VERSION = "2.2"
@@ -76,6 +86,19 @@ class VideoSplitApp:
         # 音频配置
         self.audio_source = tk.StringVar(value="template")
         self.custom_audio_path = tk.StringVar()
+
+        # 音量控制 (0-200, 100=原音量)
+        self.template_volume = tk.IntVar(value=100)
+        self.list_volume = tk.IntVar(value=100)
+        self.custom_volume = tk.IntVar(value=100)
+        self._audio_player = None  # 音频播放进程
+
+        # 分界线设置
+        self.divider_enabled = tk.BooleanVar(value=False)  # 是否启用自定义分界线
+        self.divider_color = tk.StringVar(value="#FFFFFF")  # 分界线颜色
+        self.divider_width = tk.IntVar(value=2)  # 分界线宽度
+        self.divider_curve_points = []  # 曲线控制点列表 [(x1,y1), (x2,y2), ...]
+        self._divider_mask_path = None  # 生成的蒙版图片路径
 
         # 输出尺寸配置
         self.output_size_mode = tk.StringVar(value="template")
@@ -268,9 +291,8 @@ class VideoSplitApp:
         main_container.pack(fill=tk.BOTH, expand=True)
 
         # ========== 左侧：设置区域 ==========
-        left_frame = ttk.Frame(main_container, width=340)
-        left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        left_frame.pack_propagate(False)
+        left_frame = ttk.Frame(main_container)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
         # --- 拼接部分选择 ---
         merge_inner = ttk.Frame(left_frame)
@@ -336,6 +358,42 @@ class VideoSplitApp:
             command=self._show_effect_diagram
         )
         self.effect_diagram_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        # --- 曲线分界线设置 ---
+        divider_frame = ttk.Frame(left_frame)
+        divider_frame.pack(fill=tk.X, pady=2)
+
+        self.divider_check = ttk.Checkbutton(
+            divider_frame, text="曲线分界线",
+            variable=self.divider_enabled,
+            command=self._on_divider_toggle
+        )
+        self.divider_check.pack(side=tk.LEFT, padx=3)
+
+        self.divider_edit_btn = ttk.Button(
+            divider_frame, text="编辑曲线", width=8,
+            command=self._open_curve_editor, state='disabled'
+        )
+        self.divider_edit_btn.pack(side=tk.LEFT, padx=3)
+
+        ttk.Label(divider_frame, text="宽度:").pack(side=tk.LEFT, padx=(8, 2))
+        self.divider_width_spin = ttk.Spinbox(
+            divider_frame, from_=0, to=20, width=4,
+            textvariable=self.divider_width, state='disabled'
+        )
+        self.divider_width_spin.pack(side=tk.LEFT)
+
+        self.divider_color_btn = ttk.Button(
+            divider_frame, text="颜色", width=5,
+            command=self._select_divider_color, state='disabled'
+        )
+        self.divider_color_btn.pack(side=tk.LEFT, padx=3)
+
+        self.divider_sync_btn = ttk.Button(
+            divider_frame, text="同步全部", width=7,
+            command=self._sync_curve_to_all, state='disabled'
+        )
+        self.divider_sync_btn.pack(side=tk.LEFT, padx=3)
 
         # --- 分隔线 ---
         ttk.Separator(left_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
@@ -588,6 +646,82 @@ class VideoSplitApp:
             custom_audio_frame, text="选择", command=self._select_custom_audio, width=6
         ).pack(side=tk.LEFT, padx=3)
 
+        # 音量控制区域
+        ttk.Separator(audio_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
+        volume_title_frame = ttk.Frame(audio_frame)
+        volume_title_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(volume_title_frame, text="音量控制 (0-200%):").pack(side=tk.LEFT, padx=5)
+
+        # 全局音量控制
+        global_vol_frame = ttk.Frame(audio_frame)
+        global_vol_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(global_vol_frame, text="全局音量:", width=10).pack(side=tk.LEFT, padx=5)
+        self.global_volume = tk.IntVar(value=100)
+        self.global_volume_scale = ttk.Scale(
+            global_vol_frame, from_=0, to=200, variable=self.global_volume,
+            orient=tk.HORIZONTAL, length=120, command=self._on_global_volume_change
+        )
+        self.global_volume_scale.pack(side=tk.LEFT, padx=3)
+        self.global_volume_label = ttk.Label(global_vol_frame, text="100%", width=5)
+        self.global_volume_label.pack(side=tk.LEFT)
+        ttk.Button(
+            global_vol_frame, text="应用到全部", width=10,
+            command=self._apply_global_volume
+        ).pack(side=tk.LEFT, padx=5)
+
+        # 模板音频音量
+        template_vol_frame = ttk.Frame(audio_frame)
+        template_vol_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(template_vol_frame, text="模板音量:", width=10).pack(side=tk.LEFT, padx=5)
+        self.template_volume_scale = ttk.Scale(
+            template_vol_frame, from_=0, to=200, variable=self.template_volume,
+            orient=tk.HORIZONTAL, length=120, command=lambda v: self._on_volume_change('template', v)
+        )
+        self.template_volume_scale.pack(side=tk.LEFT, padx=3)
+        self.template_volume_label = ttk.Label(template_vol_frame, text="100%", width=5)
+        self.template_volume_label.pack(side=tk.LEFT)
+        ttk.Button(
+            template_vol_frame, text="试听", width=6,
+            command=lambda: self._preview_audio('template')
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            template_vol_frame, text="停止", width=6,
+            command=self._stop_audio_preview
+        ).pack(side=tk.LEFT)
+
+        # 列表音频音量
+        list_vol_frame = ttk.Frame(audio_frame)
+        list_vol_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(list_vol_frame, text="列表音量:", width=10).pack(side=tk.LEFT, padx=5)
+        self.list_volume_scale = ttk.Scale(
+            list_vol_frame, from_=0, to=200, variable=self.list_volume,
+            orient=tk.HORIZONTAL, length=120, command=lambda v: self._on_volume_change('list', v)
+        )
+        self.list_volume_scale.pack(side=tk.LEFT, padx=3)
+        self.list_volume_label = ttk.Label(list_vol_frame, text="100%", width=5)
+        self.list_volume_label.pack(side=tk.LEFT)
+        ttk.Button(
+            list_vol_frame, text="试听", width=6,
+            command=lambda: self._preview_audio('list')
+        ).pack(side=tk.LEFT, padx=3)
+
+        # 自定义音频音量
+        custom_vol_frame = ttk.Frame(audio_frame)
+        custom_vol_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(custom_vol_frame, text="自定义音量:", width=10).pack(side=tk.LEFT, padx=5)
+        self.custom_volume_scale = ttk.Scale(
+            custom_vol_frame, from_=0, to=200, variable=self.custom_volume,
+            orient=tk.HORIZONTAL, length=120, command=lambda v: self._on_volume_change('custom', v)
+        )
+        self.custom_volume_scale.pack(side=tk.LEFT, padx=3)
+        self.custom_volume_label = ttk.Label(custom_vol_frame, text="100%", width=5)
+        self.custom_volume_label.pack(side=tk.LEFT)
+        ttk.Button(
+            custom_vol_frame, text="试听", width=6,
+            command=lambda: self._preview_audio('custom')
+        ).pack(side=tk.LEFT, padx=3)
+
     def _create_output_section(self, parent):
         """创建输出设置区域"""
         output_frame = ttk.LabelFrame(parent, text="输出设置", padding="5")
@@ -704,6 +838,30 @@ class VideoSplitApp:
 
     def _on_merge_change(self):
         """当拼接部分勾选变化时更新预览说明"""
+        # 如果分割模式改变且曲线分界线已启用，重置曲线控制点
+        if self.divider_enabled.get() and self.divider_curve_points:
+            mode = self.split_mode.get()
+            # 检查当前曲线是否与模式匹配
+            if mode == "horizontal":
+                # 左右分割应该是竖线：所有点的y坐标不同
+                if len(self.divider_curve_points) >= 2:
+                    # 如果第一个和最后一个点的x坐标相同但y不同，说明是竖线，正确
+                    first_y = self.divider_curve_points[0][1]
+                    last_y = self.divider_curve_points[-1][1]
+                    if abs(first_y - last_y) < 0.1:
+                        # y坐标相近说明是横线，需要重置为竖线
+                        self._init_default_curve_points()
+                        self._divider_mask_path = None
+            else:
+                # 上下分割应该是横线：所有点的x坐标不同
+                if len(self.divider_curve_points) >= 2:
+                    first_x = self.divider_curve_points[0][0]
+                    last_x = self.divider_curve_points[-1][0]
+                    if abs(first_x - last_x) < 0.1:
+                        # x坐标相近说明是竖线，需要重置为横线
+                        self._init_default_curve_points()
+                        self._divider_mask_path = None
+
         a = self.use_part_a.get()
         b = self.use_part_b.get()
         c = self.use_part_c.get()
@@ -763,825 +921,9 @@ class VideoSplitApp:
 
         self._draw_merge_preview()
 
-    def _draw_merge_preview(self):
-        """绘制拼接预览（显示实际视频帧或占位符）"""
-        canvas = self.merge_preview_canvas
-        canvas.delete("all")
-
-        w = 280
-        h = 180
-
-        # 如果没有模板视频，显示占位符
-        if not self.template_video.get():
-            canvas.create_text(
-                w // 2, h // 2,
-                text="请选择模板视频", fill='#888', font=('Arial', 11)
-            )
-            return
-
-        # 如果有缓存的预览图像，直接显示
-        if self.merge_preview_photo:
-            canvas.create_image(w // 2, h // 2, image=self.merge_preview_photo)
-        else:
-            # 显示提示
-            canvas.create_text(
-                w // 2, h // 2 - 10,
-                text="点击[刷新]生成预览", fill='#aaa', font=('Arial', 10)
-            )
-            canvas.create_text(
-                w // 2, h // 2 + 10,
-                text="或添加列表视频", fill='#777', font=('Arial', 9)
-            )
-
-    def _refresh_merge_preview(self):
-        """刷新拼接预览（根据封面类型显示不同内容）"""
-        canvas = self.merge_preview_canvas
-        canvas_w, canvas_h = 280, 180
-
-        template_path = self.template_video.get()
-        if not template_path:
-            self._draw_merge_preview()
-            return
-
-        # 获取当前选中的列表视频
-        list_video_path = None
-        if self.video_items:
-            idx = self.preview_video_combo.current()
-            if 0 <= idx < len(self.video_items):
-                list_video_path = self.video_items[idx].path
-
-        # 获取当前封面类型
-        cover_type = self.global_cover_type.get()
-
-        try:
-            temp_dir = get_temp_dir()
-            frame_time = self.global_cover_frame_time.get()
-
-            # 根据封面类型决定显示内容
-            if cover_type == "template":
-                # 模板帧 - 只显示模板视频
-                template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
-                if not extract_frame(template_path, template_frame_path, frame_time):
-                    raise Exception("无法提取模板帧")
-                preview_img = Image.open(template_frame_path)
-                preview_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = preview_img
-                self.merge_preview_photo = ImageTk.PhotoImage(preview_img)
-                self._draw_merge_preview()
-                self.merge_preview_var.set("预览: 模板视频帧")
-                return
-
-            elif cover_type == "list":
-                # 列表帧 - 只显示列表视频
-                if not list_video_path:
-                    canvas.delete("all")
-                    canvas.create_text(
-                        canvas_w // 2, canvas_h // 2,
-                        text="请添加列表视频", fill='#f66', font=('Arial', 10)
-                    )
-                    return
-                list_frame_path = os.path.join(temp_dir, "preview_list.jpg")
-                if not extract_frame(list_video_path, list_frame_path, frame_time):
-                    raise Exception("无法提取列表帧")
-                preview_img = Image.open(list_frame_path)
-                preview_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = preview_img
-                self.merge_preview_photo = ImageTk.PhotoImage(preview_img)
-                self._draw_merge_preview()
-                self.merge_preview_var.set("预览: 列表视频帧")
-                return
-
-            # 其他情况（merged、none、image等）显示拼接预览
-            # 提取模板帧
-            template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
-            if not extract_frame(template_path, template_frame_path, frame_time):
-                raise Exception("无法提取模板帧")
-            template_img = Image.open(template_frame_path)
-
-            # 如果没有列表视频，只显示模板
-            if not list_video_path:
-                template_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = template_img
-                self.merge_preview_photo = ImageTk.PhotoImage(template_img)
-                self._draw_merge_preview()
-                self.merge_preview_var.set("预览: 模板视频")
-                return
-
-            # 提取列表帧
-            list_frame_path = os.path.join(temp_dir, "preview_list.jpg")
-            if not extract_frame(list_video_path, list_frame_path, frame_time):
-                raise Exception("无法提取列表帧")
-            list_img = Image.open(list_frame_path)
-
-            # 模拟拼接
-            merged_img = self._simulate_merge(template_img, list_img)
-
-            # 缩放到画布大小
-            merged_img.thumbnail((canvas_w - 10, canvas_h - 10), Image.Resampling.LANCZOS)
-
-            self.merge_preview_image = merged_img
-            self.merge_preview_photo = ImageTk.PhotoImage(merged_img)
-            self._draw_merge_preview()
-            self.merge_preview_var.set("预览: 拼接效果")
-
-        except Exception as e:
-            logger.warning(f"生成预览失败: {e}")
-            canvas.delete("all")
-            canvas.create_text(
-                canvas_w // 2, canvas_h // 2,
-                text=f"预览生成失败", fill='#f66', font=('Arial', 10)
-            )
-
-    def _scale_image_with_mode(self, img, target_w, target_h, mode="stretch"):
-        """
-        根据缩放模式缩放图片
-
-        Args:
-            img: PIL Image对象
-            target_w: 目标宽度
-            target_h: 目标高度
-            mode: 缩放模式 (stretch/fill/fit)
-
-        Returns:
-            缩放后的PIL Image
-        """
-        if mode == "fill":
-            # 填充模式：放大到覆盖目标区域，然后居中裁剪
-            img_ratio = img.width / img.height
-            target_ratio = target_w / target_h
-            if img_ratio > target_ratio:
-                # 图片更宽，按高度缩放后裁剪宽度
-                new_h = target_h
-                new_w = int(new_h * img_ratio)
-            else:
-                # 图片更高，按宽度缩放后裁剪高度
-                new_w = target_w
-                new_h = int(new_w / img_ratio)
-            scaled = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            # 居中裁剪
-            left = (new_w - target_w) // 2
-            top = (new_h - target_h) // 2
-            return scaled.crop((left, top, left + target_w, top + target_h))
-
-        elif mode == "fit":
-            # 适应模式：缩小到适应目标区域，添加黑边
-            img_ratio = img.width / img.height
-            target_ratio = target_w / target_h
-            if img_ratio > target_ratio:
-                # 图片更宽，按宽度缩放
-                new_w = target_w
-                new_h = int(new_w / img_ratio)
-            else:
-                # 图片更高，按高度缩放
-                new_h = target_h
-                new_w = int(new_h * img_ratio)
-            scaled = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            # 创建黑色背景并居中粘贴
-            result = Image.new('RGB', (target_w, target_h), (0, 0, 0))
-            paste_x = (target_w - new_w) // 2
-            paste_y = (target_h - new_h) // 2
-            result.paste(scaled, (paste_x, paste_y))
-            return result
-
-        else:
-            # 拉伸模式（默认）：直接缩放到目标尺寸
-            return img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-
-    def _simulate_merge(self, template_img, list_img):
-        """模拟拼接效果（用PIL实现，支持缩放模式）"""
-        split_ratio = self.split_ratio.get()
-        output_ratio = self.output_ratio.get() if self.output_ratio_enabled.get() else 0.5
-        is_horizontal = self.split_mode.get() == "horizontal"
-        is_template_first = self.position_order.get() == "template_first"
-
-        # 获取缩放模式
-        template_scale_mode = self.template_scale_mode.get()
-        list_scale_mode = self.list_scale_mode.get()
-
-        # 目标尺寸（使用模板尺寸）
-        out_w, out_h = template_img.size
-
-        # 裁剪模板
-        if is_horizontal:
-            t_crop_w = int(template_img.width * split_ratio)
-            template_part = template_img.crop((0, 0, t_crop_w, template_img.height))
-            l_crop_w = int(list_img.width * split_ratio)
-            list_part = list_img.crop((0, 0, l_crop_w, list_img.height))
-        else:
-            t_crop_h = int(template_img.height * split_ratio)
-            template_part = template_img.crop((0, 0, template_img.width, t_crop_h))
-            l_crop_h = int(list_img.height * split_ratio)
-            list_part = list_img.crop((0, 0, list_img.width, l_crop_h))
-
-        # 计算输出各部分大小并应用缩放模式
-        if is_horizontal:
-            first_w = int(out_w * output_ratio)
-            second_w = out_w - first_w
-            if is_template_first:
-                first_part = self._scale_image_with_mode(template_part, first_w, out_h, template_scale_mode)
-                second_part = self._scale_image_with_mode(list_part, second_w, out_h, list_scale_mode)
-            else:
-                first_part = self._scale_image_with_mode(list_part, first_w, out_h, list_scale_mode)
-                second_part = self._scale_image_with_mode(template_part, second_w, out_h, template_scale_mode)
-            merged = Image.new('RGB', (out_w, out_h))
-            merged.paste(first_part, (0, 0))
-            merged.paste(second_part, (first_w, 0))
-        else:
-            first_h = int(out_h * output_ratio)
-            second_h = out_h - first_h
-            if is_template_first:
-                first_part = self._scale_image_with_mode(template_part, out_w, first_h, template_scale_mode)
-                second_part = self._scale_image_with_mode(list_part, out_w, second_h, list_scale_mode)
-            else:
-                first_part = self._scale_image_with_mode(list_part, out_w, first_h, list_scale_mode)
-                second_part = self._scale_image_with_mode(template_part, out_w, second_h, template_scale_mode)
-            merged = Image.new('RGB', (out_w, out_h))
-            merged.paste(first_part, (0, 0))
-            merged.paste(second_part, (0, first_h))
-
-        return merged
-
-    def _show_effect_diagram(self):
-        """显示效果示意图弹窗 - 支持自由拖拽调整区块大小"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("拼接效果示意")
-        dialog.geometry("400x520")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.resizable(False, False)
-
-        # 居中
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 400) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 520) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ttk.Frame(dialog, padding="10")
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        # 获取模板视频尺寸，用于计算画布比例
-        template_path = self.template_video.get()
-        video_w, video_h = 1920, 1080  # 默认16:9
-        if template_path:
-            info = get_video_info(template_path)
-            if info and info.get('width', 0) > 0 and info.get('height', 0) > 0:
-                video_w = info['width']
-                video_h = info['height']
-
-        # 根据视频比例计算画布尺寸（最大360x200，保持比例）
-        max_canvas_w, max_canvas_h = 360, 200
-        video_ratio = video_w / video_h
-        if video_ratio > max_canvas_w / max_canvas_h:
-            # 视频更宽，以宽度为准
-            canvas_w = max_canvas_w
-            canvas_h = int(canvas_w / video_ratio)
-        else:
-            # 视频更高，以高度为准
-            canvas_h = max_canvas_h
-            canvas_w = int(canvas_h * video_ratio)
-
-        # 确保最小尺寸
-        canvas_w = max(200, canvas_w)
-        canvas_h = max(120, canvas_h)
-
-        # 提示文字
-        video_info_text = f"视频尺寸: {video_w}x{video_h} | 拖拽手柄调整区块"
-        ttk.Label(
-            frame, text=video_info_text,
-            foreground='#666', font=('Arial', 9)
-        ).pack(anchor=tk.W)
-
-        # 画布 - 根据视频比例
-        canvas = tk.Canvas(frame, width=canvas_w, height=canvas_h, bg='#333', highlightthickness=1)
-        canvas.pack(pady=(5, 8))
-
-        # 存储拖拽状态
-        self._diagram_canvas = canvas
-        self._diagram_dialog = dialog
-        self._diagram_drag_target = None  # 当前拖拽目标
-        self._diagram_drag_edge = None    # 拖拽的边缘
-
-        # 初始化区块数据 (相对于画布的位置和大小)
-        padding = 10
-        mode = self.split_mode.get()
-        is_template_first = self.position_order.get() == "template_first"
-        output_ratio = self.output_ratio.get() if self.output_ratio_enabled.get() else 0.5
-
-        inner_w = canvas_w - 2 * padding
-        inner_h = canvas_h - 2 * padding
-
-        if mode == "horizontal":
-            # 左右布局
-            first_w = int(inner_w * output_ratio)
-            self._diagram_blocks = {
-                'first': {'x': padding, 'y': padding, 'w': first_w, 'h': inner_h},
-                'second': {'x': padding + first_w, 'y': padding, 'w': inner_w - first_w, 'h': inner_h}
-            }
-        else:
-            # 上下布局
-            first_h = int(inner_h * output_ratio)
-            self._diagram_blocks = {
-                'first': {'x': padding, 'y': padding, 'w': inner_w, 'h': first_h},
-                'second': {'x': padding, 'y': padding + first_h, 'w': inner_w, 'h': inner_h - first_h}
-            }
-
-        self._diagram_is_template_first = is_template_first
-        self._diagram_mode = mode
-        self._diagram_padding = padding
-        self._diagram_inner_w = inner_w
-        self._diagram_inner_h = inner_h
-        self._diagram_video_size = (video_w, video_h)  # 保存视频尺寸用于显示
-
-        # 绘制初始状态
-        self._draw_draggable_diagram()
-
-        # 绑定鼠标事件
-        canvas.bind('<Button-1>', self._on_diagram_mouse_down)
-        canvas.bind('<B1-Motion>', self._on_diagram_mouse_move)
-        canvas.bind('<ButtonRelease-1>', self._on_diagram_mouse_up)
-        canvas.bind('<Motion>', self._on_diagram_hover)
-
-        # 尺寸信息显示
-        self._diagram_info_var = tk.StringVar(value="拖拽边缘调整区块大小")
-        ttk.Label(frame, textvariable=self._diagram_info_var, foreground='#0066cc').pack(anchor=tk.W, pady=2)
-
-        # 缩放模式设置
-        scale_frame = ttk.LabelFrame(frame, text="缩放模式 (视频如何填充区块)", padding="5")
-        scale_frame.pack(fill=tk.X, pady=(0, 5))
-
-        # 模板视频缩放模式
-        template_row = ttk.Frame(scale_frame)
-        template_row.pack(fill=tk.X, pady=2)
-        ttk.Label(template_row, text="模板视频:", width=10).pack(side=tk.LEFT)
-        for mode_val, text in [("fit", "适应"), ("fill", "填充"), ("stretch", "拉伸")]:
-            ttk.Radiobutton(
-                template_row, text=text, variable=self.template_scale_mode,
-                value=mode_val
-            ).pack(side=tk.LEFT, padx=5)
-
-        # 列表视频缩放模式
-        list_row = ttk.Frame(scale_frame)
-        list_row.pack(fill=tk.X, pady=2)
-        ttk.Label(list_row, text="列表视频:", width=10).pack(side=tk.LEFT)
-        for mode_val, text in [("fit", "适应"), ("fill", "填充"), ("stretch", "拉伸")]:
-            ttk.Radiobutton(
-                list_row, text=text, variable=self.list_scale_mode,
-                value=mode_val
-            ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            scale_frame,
-            text="适应=留黑边  填充=裁切  拉伸=变形填满",
-            foreground='#888', font=('Arial', 8)
-        ).pack(anchor=tk.W)
-
-        # 按钮区域
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X, pady=(8, 0))
-
-        def apply_and_close():
-            # 计算并应用比例
-            mode = self._diagram_mode
-            first = self._diagram_blocks['first']
-            second = self._diagram_blocks['second']
-
-            if mode == "horizontal":
-                total_w = first['w'] + second['w']
-                new_ratio = first['w'] / total_w if total_w > 0 else 0.5
-            else:
-                total_h = first['h'] + second['h']
-                new_ratio = first['h'] / total_h if total_h > 0 else 0.5
-
-            self.output_ratio_enabled.set(True)
-            self.output_ratio.set(new_ratio)
-            self._on_output_ratio_toggle()
-            self._refresh_merge_preview()
-            self.status_var.set(f"已应用拼接设置 (比例: {round(new_ratio*100)}%:{round((1-new_ratio)*100)}%)")
-            dialog.destroy()
-
-        def reset_blocks():
-            # 重置为默认50:50
-            if self._diagram_mode == "horizontal":
-                half_w = self._diagram_inner_w // 2
-                self._diagram_blocks['first'] = {
-                    'x': self._diagram_padding, 'y': self._diagram_padding,
-                    'w': half_w, 'h': self._diagram_inner_h
-                }
-                self._diagram_blocks['second'] = {
-                    'x': self._diagram_padding + half_w, 'y': self._diagram_padding,
-                    'w': self._diagram_inner_w - half_w, 'h': self._diagram_inner_h
-                }
-            else:
-                half_h = self._diagram_inner_h // 2
-                self._diagram_blocks['first'] = {
-                    'x': self._diagram_padding, 'y': self._diagram_padding,
-                    'w': self._diagram_inner_w, 'h': half_h
-                }
-                self._diagram_blocks['second'] = {
-                    'x': self._diagram_padding, 'y': self._diagram_padding + half_h,
-                    'w': self._diagram_inner_w, 'h': self._diagram_inner_h - half_h
-                }
-            self._draw_draggable_diagram()
-            self._diagram_info_var.set("已重置为50:50")
-
-        ttk.Button(btn_frame, text="应用", command=apply_and_close, width=8).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="重置", command=reset_blocks, width=8).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="关闭", command=dialog.destroy, width=8).pack(side=tk.LEFT, padx=5)
-
-    def _draw_draggable_diagram(self):
-        """绘制可拖拽的效果示意图"""
-        canvas = self._diagram_canvas
-        canvas.delete("all")
-
-        first = self._diagram_blocks['first']
-        second = self._diagram_blocks['second']
-        is_template_first = self._diagram_is_template_first
-
-        template_color = "#4A90D9"
-        list_color = "#E8A838"
-        handle_color = "#ffffff"
-
-        # 确定颜色
-        first_color = template_color if is_template_first else list_color
-        second_color = list_color if is_template_first else template_color
-        first_label = "模板" if is_template_first else "列表"
-        second_label = "列表" if is_template_first else "模板"
-
-        # 获取画布尺寸（使用存储的内部尺寸）
-        padding = self._diagram_padding
-        inner_w = self._diagram_inner_w
-        inner_h = self._diagram_inner_h
-
-        # 计算画布到视频的缩放比例
-        video_w, video_h = getattr(self, '_diagram_video_size', (1920, 1080))
-        scale_x = video_w / inner_w
-        scale_y = video_h / inner_h
-
-        # 计算实际像素尺寸
-        first_real_w = int(first['w'] * scale_x)
-        first_real_h = int(first['h'] * scale_y)
-        second_real_w = int(second['w'] * scale_x)
-        second_real_h = int(second['h'] * scale_y)
-
-        # 绘制画布背景区域（显示输出区域）
-        canvas.create_rectangle(
-            padding, padding,
-            padding + inner_w, padding + inner_h,
-            fill='#222', outline='#555', width=1
-        )
-
-        # 绘制第一个区块
-        canvas.create_rectangle(
-            first['x'], first['y'],
-            first['x'] + first['w'], first['y'] + first['h'],
-            fill=first_color, outline="#fff", width=2, tags="block_first"
-        )
-        # 区块标签和尺寸（显示实际像素）
-        canvas.create_text(
-            first['x'] + first['w'] // 2, first['y'] + first['h'] // 2 - 10,
-            text=first_label, fill="white", font=('Arial', 11, 'bold')
-        )
-        canvas.create_text(
-            first['x'] + first['w'] // 2, first['y'] + first['h'] // 2 + 10,
-            text=f"{first_real_w}x{first_real_h}", fill="white", font=('Arial', 9)
-        )
-
-        # 绘制第二个区块
-        canvas.create_rectangle(
-            second['x'], second['y'],
-            second['x'] + second['w'], second['y'] + second['h'],
-            fill=second_color, outline="#fff", width=2, tags="block_second"
-        )
-        canvas.create_text(
-            second['x'] + second['w'] // 2, second['y'] + second['h'] // 2 - 10,
-            text=second_label, fill="white", font=('Arial', 11, 'bold')
-        )
-        canvas.create_text(
-            second['x'] + second['w'] // 2, second['y'] + second['h'] // 2 + 10,
-            text=f"{second_real_w}x{second_real_h}", fill="white", font=('Arial', 9)
-        )
-
-        # 绘制拖拽手柄（四个角落的小方块）
-        handle_size = 6
-        for block in [first, second]:
-            bx, by, bw, bh = block['x'], block['y'], block['w'], block['h']
-            corners = [
-                (bx, by),  # 左上
-                (bx + bw, by),  # 右上
-                (bx, by + bh),  # 左下
-                (bx + bw, by + bh),  # 右下
-            ]
-            for cx, cy in corners:
-                canvas.create_rectangle(
-                    cx - handle_size // 2, cy - handle_size // 2,
-                    cx + handle_size // 2, cy + handle_size // 2,
-                    fill=handle_color, outline='#666'
-                )
-
-            # 边缘中心手柄
-            edge_handles = [
-                (bx + bw // 2, by),  # 上
-                (bx + bw // 2, by + bh),  # 下
-                (bx, by + bh // 2),  # 左
-                (bx + bw, by + bh // 2),  # 右
-            ]
-            for ex, ey in edge_handles:
-                canvas.create_rectangle(
-                    ex - handle_size // 2, ey - handle_size // 2,
-                    ex + handle_size // 2, ey + handle_size // 2,
-                    fill=handle_color, outline='#666'
-                )
-
-    def _on_diagram_hover(self, event):
-        """鼠标悬停 - 改变光标"""
-        canvas = self._diagram_canvas
-        edge = self._detect_drag_edge(event.x, event.y)
-
-        if edge in ("first_left", "first_right", "second_left", "second_right"):
-            canvas.config(cursor="sb_h_double_arrow")
-        elif edge in ("first_top", "first_bottom", "second_top", "second_bottom"):
-            canvas.config(cursor="sb_v_double_arrow")
-        elif edge in ("first_corner_br", "second_corner_br", "first_corner_tl", "second_corner_tl"):
-            canvas.config(cursor="sizing")
-        elif edge in ("first_corner_bl", "second_corner_bl", "first_corner_tr", "second_corner_tr"):
-            canvas.config(cursor="sizing")
-        else:
-            canvas.config(cursor="")
-
-    def _detect_drag_edge(self, x, y):
-        """检测鼠标位置对应的拖拽边缘 - 支持所有边缘和角落"""
-        threshold = 8  # 边缘检测范围
-        corner_threshold = 12  # 角落检测范围
-
-        for block_name in ['first', 'second']:
-            block = self._diagram_blocks[block_name]
-            bx, by, bw, bh = block['x'], block['y'], block['w'], block['h']
-
-            # 检测四个角落（优先级最高）
-            # 右下角
-            if abs(x - (bx + bw)) < corner_threshold and abs(y - (by + bh)) < corner_threshold:
-                return f"{block_name}_corner_br"
-            # 左上角
-            if abs(x - bx) < corner_threshold and abs(y - by) < corner_threshold:
-                return f"{block_name}_corner_tl"
-            # 右上角
-            if abs(x - (bx + bw)) < corner_threshold and abs(y - by) < corner_threshold:
-                return f"{block_name}_corner_tr"
-            # 左下角
-            if abs(x - bx) < corner_threshold and abs(y - (by + bh)) < corner_threshold:
-                return f"{block_name}_corner_bl"
-
-            # 检测四个边缘
-            # 右边缘
-            if abs(x - (bx + bw)) < threshold and by < y < by + bh:
-                return f"{block_name}_right"
-            # 左边缘
-            if abs(x - bx) < threshold and by < y < by + bh:
-                return f"{block_name}_left"
-            # 下边缘
-            if abs(y - (by + bh)) < threshold and bx < x < bx + bw:
-                return f"{block_name}_bottom"
-            # 上边缘
-            if abs(y - by) < threshold and bx < x < bx + bw:
-                return f"{block_name}_top"
-
-        return None
-
-    def _on_diagram_mouse_down(self, event):
-        """鼠标按下"""
-        edge = self._detect_drag_edge(event.x, event.y)
-        self._diagram_drag_edge = edge
-        self._diagram_drag_start = (event.x, event.y)
-
-    def _on_diagram_mouse_move(self, event):
-        """鼠标移动 - 拖拽调整"""
-        if not self._diagram_drag_edge:
-            return
-
-        padding = self._diagram_padding
-        inner_w = self._diagram_inner_w
-        inner_h = self._diagram_inner_h
-        min_size = 30  # 最小尺寸
-
-        edge = self._diagram_drag_edge
-        block_name = edge.split('_')[0]  # 'first' or 'second'
-        block = self._diagram_blocks[block_name]
-
-        # 边界限制
-        min_x, min_y = padding, padding
-        max_x = padding + inner_w
-        max_y = padding + inner_h
-
-        if '_corner_' in edge:
-            # 角落拖拽 - 同时调整宽高
-            corner_type = edge.split('_corner_')[1]
-            if corner_type == 'br':  # 右下角
-                new_w = max(min_size, event.x - block['x'])
-                new_h = max(min_size, event.y - block['y'])
-                block['w'] = min(new_w, max_x - block['x'])
-                block['h'] = min(new_h, max_y - block['y'])
-            elif corner_type == 'tl':  # 左上角
-                new_x = max(min_x, min(event.x, block['x'] + block['w'] - min_size))
-                new_y = max(min_y, min(event.y, block['y'] + block['h'] - min_size))
-                block['w'] = block['x'] + block['w'] - new_x
-                block['h'] = block['y'] + block['h'] - new_y
-                block['x'] = new_x
-                block['y'] = new_y
-            elif corner_type == 'tr':  # 右上角
-                new_w = max(min_size, event.x - block['x'])
-                new_y = max(min_y, min(event.y, block['y'] + block['h'] - min_size))
-                block['w'] = min(new_w, max_x - block['x'])
-                old_bottom = block['y'] + block['h']
-                block['y'] = new_y
-                block['h'] = old_bottom - new_y
-            elif corner_type == 'bl':  # 左下角
-                new_x = max(min_x, min(event.x, block['x'] + block['w'] - min_size))
-                new_h = max(min_size, event.y - block['y'])
-                old_right = block['x'] + block['w']
-                block['x'] = new_x
-                block['w'] = old_right - new_x
-                block['h'] = min(new_h, max_y - block['y'])
-        elif '_right' in edge:
-            # 右边缘
-            new_w = max(min_size, event.x - block['x'])
-            block['w'] = min(new_w, max_x - block['x'])
-        elif '_left' in edge:
-            # 左边缘
-            new_x = max(min_x, min(event.x, block['x'] + block['w'] - min_size))
-            block['w'] = block['x'] + block['w'] - new_x
-            block['x'] = new_x
-        elif '_bottom' in edge:
-            # 下边缘
-            new_h = max(min_size, event.y - block['y'])
-            block['h'] = min(new_h, max_y - block['y'])
-        elif '_top' in edge:
-            # 上边缘
-            new_y = max(min_y, min(event.y, block['y'] + block['h'] - min_size))
-            block['h'] = block['y'] + block['h'] - new_y
-            block['y'] = new_y
-
-        self._draw_draggable_diagram()
-
-        # 更新信息显示（使用实际像素尺寸）
-        first = self._diagram_blocks['first']
-        second = self._diagram_blocks['second']
-        is_template_first = self._diagram_is_template_first
-
-        # 计算实际像素尺寸
-        video_w, video_h = getattr(self, '_diagram_video_size', (1920, 1080))
-        inner_w = self._diagram_inner_w
-        inner_h = self._diagram_inner_h
-        scale_x = video_w / inner_w
-        scale_y = video_h / inner_h
-
-        first_real_w = int(first['w'] * scale_x)
-        first_real_h = int(first['h'] * scale_y)
-        second_real_w = int(second['w'] * scale_x)
-        second_real_h = int(second['h'] * scale_y)
-
-        if is_template_first:
-            self._diagram_info_var.set(
-                f"模板: {first_real_w}x{first_real_h}  列表: {second_real_w}x{second_real_h}"
-            )
-        else:
-            self._diagram_info_var.set(
-                f"列表: {first_real_w}x{first_real_h}  模板: {second_real_w}x{second_real_h}"
-            )
-
-    def _on_diagram_mouse_up(self, event):
-        """鼠标释放"""
-        self._diagram_drag_edge = None
-        self._diagram_canvas.config(cursor="")
-
-    def _on_cover_type_change(self):
-        """封面类型改变"""
-        cover_type = self.global_cover_type.get()
-
-        # 控制帧时间滑块显示（仅template/list/merged显示）
-        if cover_type in ("template", "list", "merged"):
-            self.cover_time_frame.pack(fill=tk.X, pady=2, after=self.cover_type_frame_ref)
-            # 根据封面类型设置滑块范围
-            self._update_cover_time_scale_range(cover_type)
-        else:
-            self.cover_time_frame.pack_forget()
-
-        # 图片选择按钮状态
-        if cover_type == "image":
-            self.cover_image_btn.config(state='normal')
-        else:
-            self.cover_image_btn.config(state='disabled')
-
-        # 刷新预览
-        self._refresh_merge_preview()
-
-    def _update_cover_time_scale_range(self, cover_type):
-        """根据封面类型更新帧时间滑块范围"""
-        max_duration = 100  # 默认值
-        if cover_type == "template" and self.template_video.get():
-            info = get_video_info(self.template_video.get())
-            if info:
-                max_duration = info.get('duration', 100)
-        elif cover_type == "list" and self.video_items:
-            idx = self.preview_video_combo.current()
-            if 0 <= idx < len(self.video_items):
-                info = get_video_info(self.video_items[idx].path)
-                if info:
-                    max_duration = info.get('duration', 100)
-        elif cover_type == "merged":
-            # 对于拼接帧，使用较短的那个视频时长
-            max_duration = 100
-            if self.template_video.get():
-                info = get_video_info(self.template_video.get())
-                if info:
-                    max_duration = info.get('duration', 100)
-
-        self.cover_time_scale.configure(to=max(1, max_duration))
-
-    def _on_cover_time_change(self, value):
-        """帧时间滑块变化"""
-        time_sec = float(value)
-        mins = int(time_sec // 60)
-        secs = int(time_sec % 60)
-        self.cover_time_label.config(text=f"{mins:02d}:{secs:02d}")
-
-    def _set_current_video_frame_time(self):
-        """将当前帧时间设置为当前预览视频的独立帧时间"""
-        if not self.video_items:
-            messagebox.showinfo("提示", "列表中没有视频")
-            return
-
-        idx = self.preview_video_combo.current()
-        if idx < 0 or idx >= len(self.video_items):
-            messagebox.showinfo("提示", "请先选择要设置的视频")
-            return
-
-        current_time = self.global_cover_frame_time.get()
-        video_item = self.video_items[idx]
-        video_item.cover_frame_time = current_time
-
-        self.status_var.set(f"已设置 {video_item.name} 的封面帧时间为 {current_time:.1f}s")
-        self._refresh_tree()
-
-    def _sync_cover_time_to_all(self):
-        """将当前帧时间同步到所有列表视频"""
-        if not self.video_items:
-            messagebox.showinfo("提示", "列表中没有视频")
-            return
-
-        current_time = self.global_cover_frame_time.get()
-        count = 0
-        for video_item in self.video_items:
-            video_item.cover_frame_time = current_time
-            count += 1
-
-        self.status_var.set(f"已将帧时间 {current_time:.1f}s 同步到 {count} 个视频")
-        self._refresh_tree()
-
-    def _apply_global_cover_settings(self):
-        """将全局封面设置应用到各视频项"""
-        cover_type = self.global_cover_type.get()
-        cover_duration = self.global_cover_duration.get()
-        cover_image_path = self.global_cover_image_path.get()
-
-        for video_item in self.video_items:
-            video_item.cover_type = cover_type
-            video_item.cover_duration = cover_duration
-            video_item.cover_frame_source = cover_type  # template/list/merged
-
-            if cover_type == "image":
-                video_item.cover_image_path = cover_image_path
-            elif cover_type == "template":
-                # 模板帧使用全局帧时间（因为模板视频是同一个）
-                video_item.cover_frame_time = self.global_cover_frame_time.get()
-            # 对于 "list" 和 "merged"，保留各视频独立的 cover_frame_time
-
-    def _select_cover_image(self):
-        """选择封面图片"""
-        file_path = filedialog.askopenfilename(
-            title="选择封面图片",
-            filetypes=[
-                ("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif"),
-                ("所有文件", "*.*")
-            ]
-        )
-        if file_path:
-            self.global_cover_image_path.set(file_path)
-            self.status_var.set(f"已选择封面图片: {os.path.basename(file_path)}")
-
-    def _on_preview_video_change(self, event=None):
-        """预览视频选择改变"""
-        self._refresh_merge_preview()
-
-    def _update_preview_combo(self):
-        """更新预览视频下拉列表"""
-        if self.video_items:
-            values = [f"{i+1}. {item.name[:20]}" for i, item in enumerate(self.video_items)]
-            self.preview_video_combo['values'] = values
-            if self.preview_video_combo.current() < 0 or self.preview_video_combo.current() >= len(values):
-                self.preview_video_combo.current(0)
-        else:
-            self.preview_video_combo['values'] = ["(请添加列表视频)"]
-            self.preview_video_combo.current(0)
+    # 拼接预览相关方法已移至 PreviewMixin
+    # 效果示意图相关方法已移至 DiagramMixin
+    # 封面设置相关方法已移至 CoverMixin
 
     def _on_output_size_mode_change(self):
         """当输出尺寸模式改变时"""
@@ -1696,416 +1038,7 @@ class VideoSplitApp:
             if not self.output_dir.get():
                 self.output_dir.set(os.path.dirname(file_path))
 
-    def _load_preview(self, video_path):
-        """加载预览"""
-        temp_dir = get_temp_dir()
-        preview_path = os.path.join(temp_dir, "preview.jpg")
-
-        if extract_frame(video_path, preview_path):
-            try:
-                img = Image.open(preview_path)
-                img.thumbnail((self.canvas_width, self.canvas_height), Image.Resampling.LANCZOS)
-                self.preview_image = img
-                self.preview_photo = ImageTk.PhotoImage(img)
-                self._update_preview()
-
-                info = get_video_info(video_path)
-                if info:
-                    width = info.get('width', 0)
-                    height = info.get('height', 0)
-                    duration = info.get('duration', 0)
-                    self.template_width = width
-                    self.template_height = height
-                    self.template_info_var.set(f"尺寸: {format_video_info(width, height, duration)}")
-                    self.status_var.set("已加载模板视频")
-                    self._update_output_size_from_template()
-            except Exception as e:
-                logger.warning(f"加载预览失败: {e}")
-                self._draw_placeholder()
-        else:
-            self._draw_placeholder()
-
-    def _draw_placeholder(self):
-        """绘制占位符"""
-        self.preview_canvas.delete("all")
-        self.preview_canvas.create_text(
-            self.canvas_width // 2, self.canvas_height // 2,
-            text="请选择模板视频以预览分割效果", fill='#888888', font=('Arial', 10)
-        )
-
-    def _update_preview(self, *args):
-        """更新预览"""
-        self.preview_canvas.delete("all")
-        if self.preview_photo:
-            x = (self.canvas_width - self.preview_image.width) // 2
-            y = (self.canvas_height - self.preview_image.height) // 2
-            self.preview_canvas.create_image(x, y, anchor=tk.NW, image=self.preview_photo)
-
-            ratio = self.split_ratio.get()
-            if self.split_mode.get() == "horizontal":
-                line_x = x + int(self.preview_image.width * ratio)
-                self.preview_canvas.create_line(
-                    line_x, y, line_x, y + self.preview_image.height,
-                    fill='red', width=2, dash=(4, 2)
-                )
-                self.preview_canvas.create_text(
-                    x + int(self.preview_image.width * ratio / 2), y + 12,
-                    text="A", fill='white', font=('Arial', 12, 'bold')
-                )
-                self.preview_canvas.create_text(
-                    x + int(self.preview_image.width * (1 + ratio) / 2), y + 12,
-                    text="B", fill='white', font=('Arial', 12, 'bold')
-                )
-            else:
-                line_y = y + int(self.preview_image.height * ratio)
-                self.preview_canvas.create_line(
-                    x, line_y, x + self.preview_image.width, line_y,
-                    fill='red', width=2, dash=(4, 2)
-                )
-                self.preview_canvas.create_text(
-                    x + self.preview_image.width // 2,
-                    y + int(self.preview_image.height * ratio / 2),
-                    text="A", fill='white', font=('Arial', 12, 'bold')
-                )
-                self.preview_canvas.create_text(
-                    x + self.preview_image.width // 2,
-                    y + int(self.preview_image.height * (1 + ratio) / 2),
-                    text="B", fill='white', font=('Arial', 12, 'bold')
-                )
-        else:
-            self._draw_placeholder()
-
-        self.ratio_label.config(text=f"{int(self.split_ratio.get() * 100)}%")
-        self._draw_merge_preview()
-
-    def _on_ratio_change(self, value):
-        """滑块变化时的回调（带防抖）"""
-        if self._preview_update_job:
-            self.root.after_cancel(self._preview_update_job)
-        self._update_split_line_only()
-        self._preview_update_job = self.root.after(50, self._full_preview_update)
-
-    def _update_split_line_only(self):
-        """仅更新分割线位置（轻量操作）"""
-        self.preview_canvas.delete("split_line")
-        if self.preview_photo:
-            x = (self.canvas_width - self.preview_image.width) // 2
-            y = (self.canvas_height - self.preview_image.height) // 2
-            ratio = self.split_ratio.get()
-            if self.split_mode.get() == "horizontal":
-                line_x = x + int(self.preview_image.width * ratio)
-                self.preview_canvas.create_line(
-                    line_x, y, line_x, y + self.preview_image.height,
-                    fill='red', width=2, dash=(4, 2), tags="split_line"
-                )
-            else:
-                line_y = y + int(self.preview_image.height * ratio)
-                self.preview_canvas.create_line(
-                    x, line_y, x + self.preview_image.width, line_y,
-                    fill='red', width=2, dash=(4, 2), tags="split_line"
-                )
-        self.ratio_label.config(text=f"{int(self.split_ratio.get() * 100)}%")
-
-    def _full_preview_update(self):
-        """完整预览更新"""
-        self._update_preview()
-
-    def _on_canvas_click(self, event):
-        """画布点击"""
-        if self.preview_image:
-            self.dragging = True
-
-    def _on_canvas_drag(self, event):
-        """画布拖拽"""
-        if self.dragging and self.preview_image:
-            x = (self.canvas_width - self.preview_image.width) // 2
-            y = (self.canvas_height - self.preview_image.height) // 2
-            if self.split_mode.get() == "horizontal":
-                new_ratio = (event.x - x) / self.preview_image.width
-            else:
-                new_ratio = (event.y - y) / self.preview_image.height
-            new_ratio = max(0.1, min(0.9, new_ratio))
-            self.split_ratio.set(new_ratio)
-            self._update_split_line_only()
-            if self._preview_update_job:
-                self.root.after_cancel(self._preview_update_job)
-            self._preview_update_job = self.root.after(100, self._full_preview_update)
-
-    def _on_canvas_release(self, event):
-        """画布释放"""
-        self.dragging = False
-
-    def _on_merge_preview_wheel(self, event):
-        """拼接预览画布滚轮事件 - 调整输出比例"""
-        # 自动启用输出比例调整
-        if not self.output_ratio_enabled.get():
-            self.output_ratio_enabled.set(True)
-            self.output_ratio.set(self.split_ratio.get())  # 初始化为当前分割比例
-            self._on_output_ratio_toggle()
-
-        # 计算滚动方向和步长
-        if event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
-            # 向上滚动 - 增加比例
-            delta = 0.02
-        elif event.num == 5 or (hasattr(event, 'delta') and event.delta < 0):
-            # 向下滚动 - 减少比例
-            delta = -0.02
-        else:
-            return
-
-        # 更新输出比例
-        new_ratio = self.output_ratio.get() + delta
-        new_ratio = max(0.1, min(0.9, new_ratio))
-        self.output_ratio.set(new_ratio)
-        self._on_output_ratio_change(new_ratio)
-
-    def _on_preview_double_click(self, event):
-        """双击预览画布 - 显示高清放大预览窗口"""
-        template_path = self.template_video.get()
-        if not template_path:
-            return
-
-        # 创建放大预览窗口
-        dialog = tk.Toplevel(self.root)
-        dialog.title("高清预览")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        # 获取屏幕尺寸
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        max_w = int(screen_w * 0.85)
-        max_h = int(screen_h * 0.85)
-
-        frame = ttk.Frame(dialog, padding="10")
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        # 显示加载提示
-        loading_label = ttk.Label(frame, text="正在生成高清预览...", font=('Arial', 11))
-        loading_label.pack(pady=50)
-        dialog.update()
-
-        try:
-            # 重新提取高分辨率帧
-            temp_dir = get_temp_dir()
-            frame_time = self.global_cover_frame_time.get()
-
-            template_frame_path = os.path.join(temp_dir, "hd_preview_template.jpg")
-            if not extract_frame(template_path, template_frame_path, frame_time):
-                raise Exception("无法提取模板帧")
-            template_img = Image.open(template_frame_path)
-
-            # 获取列表视频
-            list_video_path = None
-            if self.video_items:
-                idx = self.preview_video_combo.current()
-                if 0 <= idx < len(self.video_items):
-                    list_video_path = self.video_items[idx].path
-
-            if list_video_path:
-                list_frame_path = os.path.join(temp_dir, "hd_preview_list.jpg")
-                if not extract_frame(list_video_path, list_frame_path, frame_time):
-                    raise Exception("无法提取列表帧")
-                list_img = Image.open(list_frame_path)
-
-                # 高清拼接
-                hd_img = self._simulate_merge(template_img, list_img)
-            else:
-                hd_img = template_img
-
-            # 计算显示尺寸（适应屏幕，保持纵横比）
-            orig_w, orig_h = hd_img.size
-            scale = min(max_w / orig_w, max_h / orig_h, 1.0)  # 不放大，只缩小
-            display_w = int(orig_w * scale)
-            display_h = int(orig_h * scale)
-
-            # 移除加载提示
-            loading_label.destroy()
-
-            # 设置窗口尺寸
-            dialog.geometry(f"{display_w + 20}x{display_h + 80}")
-
-            # 居中显示
-            dialog.update_idletasks()
-            x = (screen_w - dialog.winfo_width()) // 2
-            y = (screen_h - dialog.winfo_height()) // 2
-            dialog.geometry(f"+{x}+{y}")
-
-            # 缩放到显示尺寸
-            display_img = hd_img.resize((display_w, display_h), Image.Resampling.LANCZOS)
-            display_photo = ImageTk.PhotoImage(display_img)
-
-            # 显示图片
-            canvas = tk.Canvas(frame, width=display_w, height=display_h, highlightthickness=1)
-            canvas.pack()
-            canvas.create_image(display_w // 2, display_h // 2, image=display_photo)
-            canvas.image = display_photo
-
-            # 显示分辨率信息
-            ttk.Label(
-                frame, text=f"原始分辨率: {orig_w}x{orig_h}  |  双击或按ESC关闭",
-                foreground='#666'
-            ).pack(pady=(5, 0))
-
-        except Exception as e:
-            loading_label.config(text=f"生成高清预览失败: {e}")
-            logger.warning(f"生成高清预览失败: {e}")
-
-        # 绑定关闭事件
-        dialog.bind('<Double-Button-1>', lambda e: dialog.destroy())
-        dialog.bind('<Escape>', lambda e: dialog.destroy())
-
-    def _on_merge_preview_double_click(self, event):
-        """双击预览区域 - 调整对应视频的缩放模式"""
-        x, y = event.x, event.y
-
-        # 检测点击的区域
-        clicked_area = None
-        if hasattr(self, '_merge_preview_areas'):
-            for area_name, (x1, y1, x2, y2) in self._merge_preview_areas.items():
-                if x1 <= x <= x2 and y1 <= y <= y2:
-                    clicked_area = area_name
-                    break
-
-        if clicked_area:
-            self._show_scale_mode_menu(event, clicked_area)
-        else:
-            # 点击空白区域，重置输出比例
-            self.output_ratio_enabled.set(False)
-            self.output_ratio.set(self.split_ratio.get())
-            self._on_output_ratio_toggle()
-            self.status_var.set("输出比例已重置")
-
-    def _show_scale_mode_menu(self, event, area_type):
-        """显示缩放模式选择菜单"""
-        menu = tk.Menu(self.root, tearoff=0)
-
-        if area_type == "template":
-            current_mode = self.template_scale_mode.get()
-            current_percent = self.template_scale_percent.get()
-            title = "模板视频缩放"
-        else:
-            current_mode = self.list_scale_mode.get()
-            current_percent = self.list_scale_percent.get()
-            title = "列表视频缩放"
-
-        menu.add_command(label=f"== {title} ==", state='disabled')
-        menu.add_separator()
-
-        modes = [
-            ("fit", "适应 (保持比例，留黑边)"),
-            ("fill", "填充 (保持比例，裁剪)"),
-            ("stretch", "拉伸 (变形填满)")
-        ]
-
-        for mode_value, mode_label in modes:
-            prefix = "✓ " if current_mode == mode_value else "   "
-            menu.add_command(
-                label=f"{prefix}{mode_label}",
-                command=lambda v=mode_value, t=area_type: self._set_scale_mode(t, v)
-            )
-
-        menu.add_separator()
-
-        # 自定义缩放选项
-        custom_prefix = "✓ " if current_mode == "custom" else "   "
-        custom_label = f"自定义缩放 ({current_percent}%)" if current_mode == "custom" else "自定义缩放..."
-        menu.add_command(
-            label=f"{custom_prefix}{custom_label}",
-            command=lambda t=area_type: self._show_custom_scale_dialog(t)
-        )
-
-        # 在鼠标位置显示菜单
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-
-    def _show_custom_scale_dialog(self, area_type):
-        """显示自定义缩放对话框"""
-        if area_type == "template":
-            current_percent = self.template_scale_percent.get()
-            title = "模板视频自定义缩放"
-        else:
-            current_percent = self.list_scale_percent.get()
-            title = "列表视频自定义缩放"
-
-        # 创建对话框
-        dialog = tk.Toplevel(self.root)
-        dialog.title(title)
-        dialog.geometry("300x150")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        # 居中显示
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 300) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 150) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ttk.Frame(dialog, padding="15")
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(frame, text="设置缩放百分比 (50% - 200%):", font=('Arial', 10)).pack(pady=(0, 10))
-
-        # 滑块和数值显示
-        slider_frame = ttk.Frame(frame)
-        slider_frame.pack(fill=tk.X, pady=5)
-
-        scale_var = tk.IntVar(value=current_percent)
-        scale_label = ttk.Label(slider_frame, text=f"{current_percent}%", width=6, font=('Arial', 11, 'bold'))
-        scale_label.pack(side=tk.RIGHT, padx=5)
-
-        def on_scale_change(val):
-            scale_label.config(text=f"{int(float(val))}%")
-
-        scale = ttk.Scale(
-            slider_frame, from_=50, to=200, variable=scale_var,
-            orient=tk.HORIZONTAL, command=on_scale_change
-        )
-        scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # 快捷按钮
-        quick_frame = ttk.Frame(frame)
-        quick_frame.pack(fill=tk.X, pady=8)
-        for percent in [50, 75, 100, 125, 150, 200]:
-            ttk.Button(
-                quick_frame, text=f"{percent}%", width=5,
-                command=lambda p=percent: (scale_var.set(p), scale_label.config(text=f"{p}%"))
-            ).pack(side=tk.LEFT, padx=2)
-
-        # 确定/取消按钮
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
-
-        def on_confirm():
-            self._set_scale_mode(area_type, "custom", scale_var.get())
-            dialog.destroy()
-
-        ttk.Button(btn_frame, text="确定", command=on_confirm, width=10).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy, width=10).pack(side=tk.RIGHT)
-
-    def _set_scale_mode(self, area_type, mode, percent=100):
-        """设置缩放模式"""
-        if area_type == "template":
-            self.template_scale_mode.set(mode)
-            if mode == "custom":
-                self.template_scale_percent.set(percent)
-            area_name = "模板"
-        else:
-            self.list_scale_mode.set(mode)
-            if mode == "custom":
-                self.list_scale_percent.set(percent)
-            area_name = "列表"
-
-        if mode == "custom":
-            status_text = f"{area_name}视频缩放已设置为: 自定义 {percent}%"
-        else:
-            mode_names = {"fit": "适应", "fill": "填充", "stretch": "拉伸"}
-            status_text = f"{area_name}视频缩放模式已设置为: {mode_names.get(mode, mode)}"
-
-        self.status_var.set(status_text)
-        self._draw_merge_preview()
+    # 预览加载和画布交互方法已移至 PreviewMixin
 
     def _on_output_ratio_toggle(self):
         """切换输出比例启用状态"""
@@ -2125,6 +1058,8 @@ class VideoSplitApp:
         ratio = float(value) if isinstance(value, str) else value
         self.output_ratio_label.config(text=f"{int(ratio * 100)}%")
         self._draw_merge_preview()
+
+    # 曲线分界线相关方法已移至 DividerMixin
 
     def _add_videos(self):
         """添加视频"""
@@ -2164,19 +1099,7 @@ class VideoSplitApp:
         if dir_path:
             self.output_dir.set(dir_path)
 
-    def _select_custom_audio(self):
-        """选择自定义音频文件"""
-        file_path = filedialog.askopenfilename(
-            title="选择音频文件",
-            filetypes=[
-                ("音频文件", "*.mp3 *.wav *.aac *.m4a *.flac *.ogg"),
-                ("视频文件", "*.mp4 *.avi *.mkv *.mov"),
-                ("所有文件", "*.*")
-            ]
-        )
-        if file_path:
-            self.custom_audio_path.set(file_path)
-            self.audio_source.set("custom")
+    # 音频相关方法已移至 AudioMixin
 
     def _on_naming_change(self, event=None):
         """命名规则改变"""
@@ -2213,240 +1136,7 @@ class VideoSplitApp:
         else:
             return f"{original_name}_{timestamp}.mp4"
 
-    def _start_processing(self):
-        """开始处理"""
-        if self.is_processing:
-            messagebox.showinfo("提示", "正在处理中，请等待完成")
-            return
-
-        template_path = self.template_video.get()
-        if not template_path:
-            messagebox.showwarning("警告", "请选择模板视频")
-            return
-
-        is_valid, error_msg = InputValidator.validate_video_file(template_path)
-        if not is_valid:
-            messagebox.showerror("模板视频错误", f"模板视频无效:\n{error_msg}")
-            return
-
-        if not self.video_items:
-            messagebox.showwarning("警告", "请添加要处理的视频")
-            return
-
-        for i, video_item in enumerate(self.video_items, 1):
-            is_valid, error_msg = InputValidator.validate_video_file(video_item.path)
-            if not is_valid:
-                messagebox.showerror(
-                    "列表视频错误",
-                    f"第{i}个视频 '{video_item.name}' 无效:\n{error_msg}"
-                )
-                return
-
-        output_path = self.output_dir.get()
-        if not output_path:
-            messagebox.showwarning("警告", "请选择输出目录")
-            return
-
-        is_valid, error_msg = InputValidator.validate_output_directory(output_path)
-        if not is_valid:
-            messagebox.showerror("输出目录错误", f"输出目录无效:\n{error_msg}")
-            return
-
-        combinations = self._get_merge_combinations()
-        if not combinations:
-            messagebox.showwarning("警告", "请至少勾选模板和列表各一个部分")
-            return
-
-        # 将全局封面设置应用到各视频项
-        self._apply_global_cover_settings()
-
-        self.is_processing = True
-        self.processing_stopped = False
-        self.start_btn.config(state='disabled', text="处理中...")
-        self.stop_btn.config(state='normal')
-        self.progress.configure(value=0)
-
-        thread = threading.Thread(target=self._process_videos, args=(combinations,))
-        thread.daemon = False
-        thread.start()
-        logger.info(f"启动处理线程，共 {len(self.video_items)} 个视频，{len(combinations)} 种组合")
-
-    def _process_videos(self, merge_combinations):
-        """处理视频（后台线程）"""
-        total_tasks = len(self.video_items) * len(merge_combinations)
-        success_count = 0
-        results = []
-        task_index = 0
-
-        for i, video_item in enumerate(self.video_items):
-            for merge_mode in merge_combinations:
-                # 检查是否被停止
-                if self.processing_stopped:
-                    self.root.after(0, lambda: self.status_var.set("处理已停止"))
-                    self.root.after(0, lambda: self._on_processing_complete(results, success_count, total_tasks, stopped=True))
-                    return
-
-                task_index += 1
-                task_desc = f"{video_item.name} ({merge_mode.upper()})"
-                self.root.after(0, lambda v=task_desc: self.status_var.set(f"正在处理: {v}"))
-                self.root.after(
-                    0, lambda p=(task_index / total_tasks) * 100: self.progress.configure(value=p)
-                )
-
-                base_name = os.path.splitext(video_item.name)[0]
-                if len(merge_combinations) > 1:
-                    output_filename = self._generate_output_filename(
-                        f"{base_name}_{merge_mode}", task_index
-                    )
-                else:
-                    output_filename = self._generate_output_filename(base_name, i + 1)
-                output_path = os.path.join(self.output_dir.get(), output_filename)
-
-                def progress_callback(progress, message):
-                    overall = ((task_index - 1 + progress) / total_tasks) * 100
-                    self.root.after(0, lambda p=overall: self.progress.configure(value=p))
-                    self.root.after(0, lambda m=message: self.status_var.set(m))
-
-                self.processor.set_progress_callback(progress_callback)
-
-                audio_source = self.audio_source.get()
-                custom_audio = self.custom_audio_path.get() if audio_source == "custom" else None
-
-                size_mode = self.output_size_mode.get()
-                if size_mode == "custom":
-                    out_width = self.output_width.get()
-                    out_height = self.output_height.get()
-                    scale_mode = self.scale_mode.get()
-                elif size_mode == "list":
-                    video_info = get_video_info(video_item.path)
-                    if video_info and video_info.get('width', 0) > 0 and video_info.get('height', 0) > 0:
-                        out_width = video_info.get('width')
-                        out_height = video_info.get('height')
-                        logger.debug(f"跟随列表视频尺寸: {video_item.name} -> {out_width}x{out_height}")
-                    else:
-                        out_width = None
-                        out_height = None
-                        logger.warning(f"无法获取列表视频尺寸: {video_item.name}，将使用模板尺寸")
-                    scale_mode = "fit"
-                else:
-                    out_width = None
-                    out_height = None
-                    scale_mode = None
-
-                # 确定输出比例
-                if self.output_ratio_enabled.get():
-                    current_output_ratio = self.output_ratio.get()
-                else:
-                    current_output_ratio = None  # None表示跟随分割比例
-
-                # 确定输出时长
-                duration_mode = self.output_duration_mode.get()
-
-                result = self.processor.process_videos(
-                    template_video=self.template_video.get(),
-                    target_video=video_item.path,
-                    output_path=output_path,
-                    split_mode=self.split_mode.get(),
-                    merge_mode=merge_mode,
-                    split_ratio=self.split_ratio.get(),
-                    target_split_ratio=video_item.split_ratio,
-                    target_scale_percent=video_item.scale_percent,
-                    cover_type=video_item.cover_type,
-                    cover_frame_time=video_item.cover_frame_time,
-                    cover_image_path=video_item.cover_image_path,
-                    cover_duration=video_item.cover_duration,
-                    cover_frame_source=video_item.cover_frame_source,
-                    position_order=self.position_order.get(),
-                    audio_source=audio_source,
-                    custom_audio_path=custom_audio,
-                    output_width=out_width,
-                    output_height=out_height,
-                    scale_mode=scale_mode,
-                    output_ratio=current_output_ratio,
-                    duration_mode=duration_mode,
-                    template_scale_mode=self.template_scale_mode.get(),
-                    list_scale_mode=self.list_scale_mode.get()
-                )
-
-                result_name = f"{video_item.name} ({merge_mode.upper()})"
-                results.append({'name': result_name, 'success': result.success, 'error': result.error})
-                if result.success:
-                    success_count += 1
-
-        self.root.after(0, lambda: self.progress.configure(value=100))
-        self.root.after(0, lambda: self.status_var.set(f"处理完成: 成功 {success_count}/{total_tasks}"))
-        self.root.after(0, lambda: self._on_processing_complete(results, success_count, total_tasks))
-
-    def _stop_processing(self):
-        """停止处理"""
-        if self.is_processing and not self.processing_stopped:
-            self.processing_stopped = True
-            self.stop_btn.config(state='disabled')
-            self.status_var.set("正在停止...")
-            logger.info("用户请求停止处理")
-
-    def _on_processing_complete(self, results, success_count, total_tasks, stopped=False):
-        """处理完成后的回调"""
-        self.is_processing = False
-        self.processing_stopped = False
-        self.start_btn.config(state='normal', text="开始处理")
-        self.stop_btn.config(state='disabled')
-        if stopped:
-            messagebox.showinfo("处理已停止", f"已完成 {success_count}/{total_tasks} 个任务")
-        else:
-            self._show_results(results, success_count, total_tasks)
-
-    def _show_results(self, results: list, success_count: int, total: int):
-        """显示处理结果"""
-        result_window = tk.Toplevel(self.root)
-        result_window.title("处理结果")
-        result_window.geometry("500x400")
-        result_window.transient(self.root)
-
-        title_text = f"处理完成: 成功 {success_count}/{total}"
-        color = 'green' if success_count == total else 'orange'
-        ttk.Label(
-            result_window, text=title_text, font=('Arial', 12, 'bold'), foreground=color
-        ).pack(pady=10)
-
-        frame = ttk.Frame(result_window)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        scrollbar = ttk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        text = tk.Text(frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=('Consolas', 10))
-        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=text.yview)
-
-        text.tag_configure('success', foreground='green')
-        text.tag_configure('error', foreground='red')
-        text.tag_configure('filename', foreground='blue', font=('Consolas', 10, 'bold'))
-
-        for i, result in enumerate(results):
-            text.insert(tk.END, f"{i + 1}. {result['name']}\n", 'filename')
-            if result['success']:
-                text.insert(tk.END, "   状态: 成功\n\n", 'success')
-            else:
-                text.insert(tk.END, f"   状态: 失败\n   原因: {result['error']}\n\n", 'error')
-
-        text.config(state=tk.DISABLED)
-
-        btn_frame = ttk.Frame(result_window)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="打开输出目录", command=self._open_output_dir).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="关闭", command=result_window.destroy).pack(side=tk.LEFT, padx=5)
-
-        self._open_output_dir()
-
-    def _open_output_dir(self):
-        """打开输出目录"""
-        output_dir = self.output_dir.get()
-        if output_dir and os.path.exists(output_dir):
-            if os.name == 'nt':
-                os.startfile(output_dir)
-            else:
-                subprocess.run(['xdg-open', output_dir])
+    # 处理相关方法已移至 ProcessingMixin
 
     def run(self):
         """运行主循环"""

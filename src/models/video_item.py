@@ -3,7 +3,7 @@
 """
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Tuple
 from enum import Enum
 
 
@@ -37,6 +37,7 @@ class VideoItem:
         cover_image_path: 外部封面图片路径
         cover_duration: 封面显示时长(秒)
         cover_frame_source: 封面帧来源
+        curve_points: 曲线分割控制点列表，每个点为(x, y)归一化坐标，None表示使用全局设置
     """
     path: str
     name: str = field(init=False)
@@ -48,6 +49,7 @@ class VideoItem:
     cover_image_path: Optional[str] = None
     cover_duration: float = 1.0
     cover_frame_source: str = "template"
+    curve_points: Optional[List[Tuple[float, float]]] = None  # None表示使用全局设置
 
     def __post_init__(self):
         """初始化后处理"""
@@ -82,12 +84,18 @@ class VideoItem:
             'cover_frame_time': self.cover_frame_time,
             'cover_image_path': self.cover_image_path,
             'cover_duration': self.cover_duration,
-            'cover_frame_source': self.cover_frame_source
+            'cover_frame_source': self.cover_frame_source,
+            'curve_points': self.curve_points
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> 'VideoItem':
         """从字典创建实例"""
+        # 处理 curve_points，确保转换为元组列表
+        curve_points = data.get('curve_points')
+        if curve_points:
+            curve_points = [tuple(p) for p in curve_points]
+
         item = cls(
             path=data['path'],
             split_ratio=data.get('split_ratio', 0.5),
@@ -97,7 +105,8 @@ class VideoItem:
             cover_frame_time=data.get('cover_frame_time', 0.0),
             cover_image_path=data.get('cover_image_path'),
             cover_duration=data.get('cover_duration', 1.0),
-            cover_frame_source=data.get('cover_frame_source', 'template')
+            cover_frame_source=data.get('cover_frame_source', 'template'),
+            curve_points=curve_points
         )
         return item
 
