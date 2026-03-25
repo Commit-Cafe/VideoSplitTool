@@ -6,6 +6,9 @@ on:
       - 'v*'  # 当推送 v 开头的标签时触发（如 v1.0.0）
   workflow_dispatch:  # 允许手动触发
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -42,11 +45,16 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.2 - Windows 版
+          视频分割拼接工具 V2.3 - Windows 版
 
           使用说明：
           1. 双击运行 VideoSplitTool.exe
           2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          V2.3 更新内容：
+          - 文件选择独立路径（三个按钮各自记住文件夹）
+          - MOV透明通道视频支持
+          - 默认输出尺寸/时长改为"跟随列表视频"
 
           V2.2 更新内容：
           - 曲线分界线功能（可编辑曲线形状）
@@ -101,7 +109,7 @@ jobs:
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.2 - macOS 版
+          视频分割拼接工具 V2.3 - macOS 版
 
           使用说明：
           1. 安装 FFmpeg（如果还没有）
@@ -114,6 +122,11 @@ jobs:
 
           3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
+
+          V2.3 更新内容：
+          - 文件选择独立路径（三个按钮各自记住文件夹）
+          - MOV透明通道视频支持
+          - 默认输出尺寸/时长改为"跟随列表视频"
 
           V2.2 更新内容：
           - 曲线分界线功能（可编辑曲线形状）
