@@ -106,27 +106,37 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name VideoSplitTool main.py
 
+      - name: Install and Package FFmpeg
+        run: |
+          # 使用 brew 安装 ffmpeg
+          brew install ffmpeg
+
+          # 创建 ffmpeg 目录并复制
+          mkdir -p dist/ffmpeg/bin
+          cp $(which ffmpeg) dist/ffmpeg/bin/
+          cp $(which ffprobe) dist/ffmpeg/bin/
+
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
           视频分割拼接工具 V2.3 - macOS 版
 
           使用说明：
-          1. 安装 FFmpeg（如果还没有）
-             brew install ffmpeg
-
-          2. 双击运行 VideoSplitTool
+          1. 双击运行 VideoSplitTool
              如果提示"无法打开"，请在终端执行:
              chmod +x VideoSplitTool
              ./VideoSplitTool
 
-          3. 如果遇到安全提示：
+          2. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
+
+          注意：FFmpeg 已内置在 ffmpeg/bin 目录下
 
           V2.3 更新内容：
           - 文件选择独立路径（三个按钮各自记住文件夹）
           - MOV透明通道视频支持
           - 默认输出尺寸/时长改为"跟随列表视频"
+          - macOS版本内置FFmpeg
 
           V2.2 更新内容：
           - 曲线分界线功能（可编辑曲线形状）
@@ -151,7 +161,7 @@ jobs:
         run: |
           timestamp=$(date +%Y%m%d)
           cd dist
-          zip -r "../VideoSplitTool_macOS_$timestamp.zip" VideoSplitTool README.txt
+          zip -r "../VideoSplitTool_macOS_$timestamp.zip" VideoSplitTool ffmpeg README.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
