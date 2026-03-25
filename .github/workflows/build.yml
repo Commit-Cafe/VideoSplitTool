@@ -106,15 +106,28 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name VideoSplitTool main.py
 
-      - name: Install and Package FFmpeg
+      - name: Download FFmpeg (static build)
         run: |
-          # 使用 brew 安装 ffmpeg
-          brew install ffmpeg
-
-          # 创建 ffmpeg 目录并复制
+          # 下载静态编译的 FFmpeg
           mkdir -p dist/ffmpeg/bin
-          cp $(which ffmpeg) dist/ffmpeg/bin/
-          cp $(which ffprobe) dist/ffmpeg/bin/
+          cd dist/ffmpeg/bin
+
+          # 下载 ffmpeg
+          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+          unzip ffmpeg.zip
+          rm ffmpeg.zip
+
+          # 下载 ffprobe
+          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          unzip ffprobe.zip
+          rm ffprobe.zip
+
+          # 设置执行权限
+          chmod +x ffmpeg ffprobe
+
+          # 验证
+          ls -la
+          ./ffmpeg -version
 
       - name: Create README
         run: |
