@@ -54,6 +54,11 @@ class VideoSplitApp(
         self.naming_rule = tk.StringVar(value="time")
         self.custom_prefix = tk.StringVar(value="video")
 
+        # 各文件选择对话框的独立初始目录
+        self._template_initial_dir = ""  # 模板视频选择目录
+        self._list_initial_dir = ""      # 列表视频选择目录
+        self._output_initial_dir = ""    # 输出目录选择
+
         # 拼接部分勾选
         self.use_part_a = tk.BooleanVar(value=True)
         self.use_part_b = tk.BooleanVar(value=False)
@@ -101,7 +106,7 @@ class VideoSplitApp(
         self._divider_mask_path = None  # 生成的蒙版图片路径
 
         # 输出尺寸配置
-        self.output_size_mode = tk.StringVar(value="template")
+        self.output_size_mode = tk.StringVar(value="list")
         self.output_width = tk.IntVar(value=1920)
         self.output_height = tk.IntVar(value=1080)
         self.scale_mode = tk.StringVar(value="fit")
@@ -109,7 +114,7 @@ class VideoSplitApp(
         self.template_height = 0
 
         # 输出时长配置
-        self.output_duration_mode = tk.StringVar(value="template")  # template/list
+        self.output_duration_mode = tk.StringVar(value="list")  # list/template
 
         # 预览相关
         self.preview_image = None
@@ -523,12 +528,12 @@ class VideoSplitApp(
         size_mode_frame.pack(fill=tk.X, pady=2)
 
         ttk.Radiobutton(
-            size_mode_frame, text="跟随模板视频", variable=self.output_size_mode,
-            value="template", command=self._on_output_size_mode_change
-        ).pack(side=tk.LEFT, padx=8)
-        ttk.Radiobutton(
             size_mode_frame, text="跟随列表视频（一对一）", variable=self.output_size_mode,
             value="list", command=self._on_output_size_mode_change
+        ).pack(side=tk.LEFT, padx=8)
+        ttk.Radiobutton(
+            size_mode_frame, text="跟随模板视频", variable=self.output_size_mode,
+            value="template", command=self._on_output_size_mode_change
         ).pack(side=tk.LEFT, padx=8)
         ttk.Radiobutton(
             size_mode_frame, text="自定义尺寸", variable=self.output_size_mode,
@@ -596,12 +601,12 @@ class VideoSplitApp(
         duration_mode_frame.pack(fill=tk.X, pady=2)
 
         ttk.Radiobutton(
-            duration_mode_frame, text="跟随模板视频", variable=self.output_duration_mode,
-            value="template"
-        ).pack(side=tk.LEFT, padx=8)
-        ttk.Radiobutton(
             duration_mode_frame, text="跟随列表视频（一对一）", variable=self.output_duration_mode,
             value="list"
+        ).pack(side=tk.LEFT, padx=8)
+        ttk.Radiobutton(
+            duration_mode_frame, text="跟随模板视频", variable=self.output_duration_mode,
+            value="template"
         ).pack(side=tk.LEFT, padx=8)
 
         # 时长说明
@@ -1027,6 +1032,7 @@ class VideoSplitApp(
         """选择模板视频"""
         file_path = filedialog.askopenfilename(
             title="选择模板视频",
+            initialdir=self._template_initial_dir,
             filetypes=[
                 ("视频文件", "*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v"),
                 ("所有文件", "*.*")
@@ -1034,6 +1040,7 @@ class VideoSplitApp(
         )
         if file_path:
             self.template_video.set(file_path)
+            self._template_initial_dir = os.path.dirname(file_path)  # 记住目录
             self._load_preview(file_path)
             if not self.output_dir.get():
                 self.output_dir.set(os.path.dirname(file_path))
@@ -1065,6 +1072,7 @@ class VideoSplitApp(
         """添加视频"""
         files = filedialog.askopenfilenames(
             title="选择视频",
+            initialdir=self._list_initial_dir,
             filetypes=[
                 ("视频文件", "*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.m4v"),
                 ("所有文件", "*.*")
@@ -1075,6 +1083,8 @@ class VideoSplitApp(
                 video_item = VideoItem(f)
                 video_item.split_ratio = self.split_ratio.get()
                 self.video_items.append(video_item)
+                # 记住最后一个文件的目录
+                self._list_initial_dir = os.path.dirname(f)
         self._refresh_tree()
         self._update_list_video_info()
 
@@ -1095,9 +1105,13 @@ class VideoSplitApp(
 
     def _select_output_dir(self):
         """选择输出目录"""
-        dir_path = filedialog.askdirectory(title="选择输出目录")
+        dir_path = filedialog.askdirectory(
+            title="选择输出目录",
+            initialdir=self._output_initial_dir
+        )
         if dir_path:
             self.output_dir.set(dir_path)
+            self._output_initial_dir = dir_path  # 记住目录
 
     # 音频相关方法已移至 AudioMixin
 

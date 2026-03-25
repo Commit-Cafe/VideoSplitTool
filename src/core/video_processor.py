@@ -254,6 +254,10 @@ class VideoProcessor:
             target_has_audio = target_info.has_audio
             logger.debug(f"音频状态: 模板={template_has_audio}, 目标={target_has_audio}, 音频来源={audio_source}")
 
+            # 检查模板视频是否有透明通道
+            template_has_alpha = template_info.has_alpha
+            logger.info(f"模板视频透明通道: {template_has_alpha}")
+
             self._report_progress(0.1, "构建处理命令")
 
             # 验证自定义音频文件
@@ -269,7 +273,25 @@ class VideoProcessor:
                 # 检查是否使用曲线蒙版
                 use_mask = divider_mask_path and os.path.exists(divider_mask_path)
 
-                if use_mask:
+                # 检查是否使用透明通道模式（模板视频有alpha通道时）
+                if template_has_alpha and not use_mask:
+                    logger.info("检测到模板视频有透明通道，使用overlay模式")
+                    filter_complex = self._build_alpha_filter_complex(
+                        split_mode, merge_mode,
+                        split_ratio, target_split_ratio,
+                        out_width, out_height,
+                        template_has_audio, target_has_audio,
+                        target_scale_percent,
+                        position_order,
+                        audio_source,
+                        scale_mode or "fit",
+                        actual_output_ratio,
+                        template_scale_mode,
+                        list_scale_mode,
+                        template_volume,
+                        list_volume
+                    )
+                elif use_mask:
                     logger.info(f"使用曲线蒙版: {divider_mask_path}")
                     filter_complex = self._build_mask_filter_complex(
                         out_width, out_height,
@@ -350,13 +372,25 @@ class VideoProcessor:
                 cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
                 has_audio_output = True
 
-            cmd.extend([
-                '-t', str(max_duration),
-                '-c:v', 'libx264',
-                '-preset', 'medium',
-                '-crf', '23',
-                output_path
-            ])
+            # 根据是否有alpha通道选择输出编码
+            if template_has_alpha and output_path.lower().endswith('.mov'):
+                # MOV格式支持alpha通道，使用ProRes 4444编码
+                cmd.extend([
+                    '-t', str(max_duration),
+                    '-c:v', 'prores_ks',
+                    '-profile:v', '4444',
+                    '-pix_fmt', 'yuva444p10le',
+                    output_path
+                ])
+                logger.info("使用ProRes 4444编码（支持透明通道）")
+            else:
+                cmd.extend([
+                    '-t', str(max_duration),
+                    '-c:v', 'libx264',
+                    '-preset', 'medium',
+                    '-crf', '23',
+                    output_path
+                ])
 
             self._report_progress(0.2, "处理视频")
 
@@ -499,6 +533,186 @@ class VideoProcessor:
                     os.remove(temp_file)
             except OSError as e:
                 logger.warning(f"无法删除临时文件 {temp_file}: {e}")
+
+    def _build_alpha_filter_complex(
+        self,
+        split_mode: str,
+        merge_mode: str,
+        split_ratio: float,
+        target_split_ratio: float,
+        out_width: int,
+        out_height: int,
+        template_has_audio: bool = True,
+        target_has_audio: bool = True,
+        target_scale_percent: int = 100,
+        position_order: str = "template_first",
+        audio_source: str = "template",
+        scale_mode: str = "fit",
+        output_ratio: float = None,
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit",
+        template_volume: int = 100,
+        list_volume: int = 100
+    ) -> str:
+        """
+        构建支持透明通道的filter_complex字符串
+        使用overlay滤镜将模板视频叠加到列表视频上，透明部分显示列表视频内容
+
+        Args:
+            参数同 _build_filter_complex
+        """
+        logger.debug(f"透明通道模式: 模板缩放={template_scale_mode}, 列表缩放={list_scale_mode}")
+        logger.debug(f"音量设置: 模板={template_volume}%, 列表={list_volume}%")
+
+        # 计算音量倍数
+        template_vol = template_volume / 100.0
+        list_vol = list_volume / 100.0
+
+        # 音频filter
+        audio_filter = None
+        if audio_source == "mix":
+            if template_has_audio and target_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[a0];[1:a]volume={list_vol}[a1];[a0][a1]amix=inputs=2:duration=longest[outa]"
+            elif template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+            elif target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+        elif audio_source == "template":
+            if template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+        elif audio_source == "list":
+            if target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+
+        scale_factor = target_scale_percent / 100.0
+        target_scaled_width = _make_even(int(out_width * scale_factor))
+        target_scaled_height = _make_even(int(out_height * scale_factor))
+        out_width = _make_even(out_width)
+        out_height = _make_even(out_height)
+
+        actual_output_ratio = output_ratio if output_ratio is not None else split_ratio
+
+        # 构建缩放滤镜
+        template_scale = _build_scale_filter(out_width, out_height, template_scale_mode)
+        list_scale = _build_scale_filter(out_width, out_height, list_scale_mode)
+
+        # 确定前景和背景
+        # 模板视频有透明通道，应该作为前景叠加在列表视频上
+        swap_order = (position_order == "list_first")
+
+        if swap_order:
+            # 列表视频在前景，模板视频在背景（不常见，但支持）
+            bg_scale = list_scale
+            fg_scale = template_scale
+            bg_input = "1:v"
+            fg_input = "0:v"
+        else:
+            # 模板视频在前景（透明部分会显示背景），列表视频在背景
+            bg_scale = list_scale
+            fg_scale = template_scale
+            bg_input = "1:v"
+            fg_input = "0:v"
+
+        # 计算裁剪区域
+        if split_mode == self.SPLIT_HORIZONTAL:
+            # 水平分割
+            part_width = _make_even(int(out_width * actual_output_ratio))
+
+            if merge_mode == self.MERGE_A_C:
+                # 使用左半部分
+                video_filter = (
+                    f"[{bg_input}]{bg_scale},crop={part_width}:{out_height}:0:0[bg];"
+                    f"[{fg_input}]{fg_scale},crop={part_width}:{out_height}:0:0[fg];"
+                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                )
+            elif merge_mode == self.MERGE_A_D:
+                # 模板左半 + 列表右半（列表右半没有透明通道，使用普通hstack）
+                list_part_width = _make_even(int(target_scaled_width * target_split_ratio))
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={part_width}:{out_height}:0:0[fg];"
+                    f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
+                    f"crop={target_scaled_width - list_part_width}:{out_height}:{list_part_width}:0[bg];"
+                    f"[fg][bg]hstack=inputs=2[outv]"
+                )
+            elif merge_mode == self.MERGE_B_C:
+                # 模板右半 + 列表左半
+                list_part_width = _make_even(int(target_scaled_width * target_split_ratio))
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
+                    f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
+                    f"crop={list_part_width}:{out_height}:0:0[bg];"
+                    f"[bg][fg]hstack=inputs=2[outv]"
+                )
+            elif merge_mode == self.MERGE_B_D:
+                # 使用右半部分
+                video_filter = (
+                    f"[{bg_input}]{bg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[bg];"
+                    f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
+                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                )
+            else:
+                # GRID模式
+                half_width = out_width // 2
+                half_height = out_height // 2
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={half_width}:{half_height}:0:0[tl];"
+                    f"[{fg_input}]{fg_scale},crop={half_width}:{half_height}:{half_width}:0[tr];"
+                    f"[{bg_input}]{bg_scale},crop={half_width}:{half_height}:0:0[bl];"
+                    f"[{bg_input}]{bg_scale},crop={half_width}:{half_height}:{half_width}:0[br];"
+                    f"[tl][tr]hstack=inputs=2[top];"
+                    f"[bl][br]hstack=inputs=2[bottom];"
+                    f"[top][bottom]vstack=inputs=2[outv]"
+                )
+        else:
+            # 垂直分割
+            part_height = _make_even(int(out_height * actual_output_ratio))
+
+            if merge_mode == self.MERGE_A_C:
+                # 使用上半部分
+                video_filter = (
+                    f"[{bg_input}]{bg_scale},crop={out_width}:{part_height}:0:0[bg];"
+                    f"[{fg_input}]{fg_scale},crop={out_width}:{part_height}:0:0[fg];"
+                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                )
+            elif merge_mode == self.MERGE_A_D:
+                list_part_height = _make_even(int(target_scaled_height * target_split_ratio))
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={out_width}:{part_height}:0:0[fg];"
+                    f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
+                    f"crop={out_width}:{target_scaled_height - list_part_height}:0:{list_part_height}[bg];"
+                    f"[fg][bg]vstack=inputs=2[outv]"
+                )
+            elif merge_mode == self.MERGE_B_C:
+                list_part_height = _make_even(int(target_scaled_height * target_split_ratio))
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
+                    f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
+                    f"crop={out_width}:{list_part_height}:0:0[bg];"
+                    f"[bg][fg]vstack=inputs=2[outv]"
+                )
+            elif merge_mode == self.MERGE_B_D:
+                video_filter = (
+                    f"[{bg_input}]{bg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[bg];"
+                    f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
+                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                )
+            else:
+                # GRID模式
+                half_width = out_width // 2
+                half_height = out_height // 2
+                video_filter = (
+                    f"[{fg_input}]{fg_scale},crop={half_width}:{half_height}:0:0[tl];"
+                    f"[{fg_input}]{fg_scale},crop={half_width}:{half_height}:0:{half_height}[tr];"
+                    f"[{bg_input}]{bg_scale},crop={half_width}:{half_height}:0:0[bl];"
+                    f"[{bg_input}]{bg_scale},crop={half_width}:{half_height}:0:{half_height}[br];"
+                    f"[tl][tr]hstack=inputs=2[top];"
+                    f"[bl][br]hstack=inputs=2[bottom];"
+                    f"[top][bottom]vstack=inputs=2[outv]"
+                )
+
+        if audio_filter:
+            return f"{video_filter};{audio_filter}"
+        return video_filter
 
     def _build_filter_complex(
         self,

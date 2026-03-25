@@ -80,6 +80,8 @@ def check_ffmpeg() -> bool:
             [ffmpeg, '-version'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         return result.returncode == 0
@@ -94,13 +96,15 @@ class VideoInfo:
     height: int = 0
     duration: float = 0.0
     has_audio: bool = False
+    has_alpha: bool = False  # 是否有透明通道
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             'width': self.width,
             'height': self.height,
             'duration': self.duration,
-            'has_audio': self.has_audio
+            'has_audio': self.has_audio,
+            'has_alpha': self.has_alpha
         }
 
 
@@ -133,6 +137,8 @@ class FFmpegHelper:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             if result.returncode != 0:
@@ -152,12 +158,14 @@ class FFmpegHelper:
                 duration = float(lines[1])
 
             has_audio = FFmpegHelper.check_has_audio(video_path)
+            has_alpha = FFmpegHelper.check_has_alpha(video_path)
 
             return VideoInfo(
                 width=width,
                 height=height,
                 duration=duration,
-                has_audio=has_audio
+                has_audio=has_audio,
+                has_alpha=has_alpha
             )
         except Exception as e:
             logger.warning(f"获取视频信息失败: {e}")
@@ -180,9 +188,40 @@ class FFmpegHelper:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             return 'audio' in result.stdout.lower()
+        except Exception:
+            return False
+
+    @staticmethod
+    def check_has_alpha(video_path: str) -> bool:
+        """检查视频是否有透明通道（alpha通道）"""
+        try:
+            ffprobe = get_ffprobe_path()
+            # 检查像素格式是否包含alpha通道
+            cmd = [
+                ffprobe,
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=pix_fmt',
+                '-of', 'csv=p=0',
+                video_path
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            pix_fmt = result.stdout.strip().lower()
+            # 常见的带alpha通道的像素格式
+            alpha_formats = ['yuva', 'rgba', 'ya8', 'ya16', 'gbrap', 'pal8', 'argb', 'bgra']
+            return any(fmt in pix_fmt for fmt in alpha_formats)
         except Exception:
             return False
 
@@ -214,6 +253,8 @@ class FFmpegHelper:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             return result.returncode == 0 and os.path.exists(output_path)
@@ -259,6 +300,8 @@ class FFmpegHelper:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             return result.returncode == 0 and os.path.exists(output_path)
@@ -282,6 +325,8 @@ class FFmpegHelper:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             if result.returncode == 0 and result.stdout.strip():
