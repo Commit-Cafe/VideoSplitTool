@@ -628,19 +628,24 @@ class VideoProcessor:
             elif merge_mode == self.MERGE_A_D:
                 # 模板左半 + 列表右半（列表右半没有透明通道，使用普通hstack）
                 list_part_width = _make_even(int(target_scaled_width * target_split_ratio))
+                bg_out_width = out_width - part_width
                 video_filter = (
                     f"[{fg_input}]{fg_scale},crop={part_width}:{out_height}:0:0[fg];"
                     f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
-                    f"crop={target_scaled_width - list_part_width}:{out_height}:{list_part_width}:0[bg];"
+                    f"crop={target_scaled_width - list_part_width}:{target_scaled_height}:{list_part_width}:0,"
+                    f"scale={bg_out_width}:{out_height}:force_original_aspect_ratio=disable[bg];"
                     f"[fg][bg]hstack=inputs=2[outv]"
                 )
             elif merge_mode == self.MERGE_B_C:
                 # 模板右半 + 列表左半
                 list_part_width = _make_even(int(target_scaled_width * target_split_ratio))
+                fg_out_width = out_width - part_width
                 video_filter = (
-                    f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
+                    f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0,"
+                    f"scale={fg_out_width}:{out_height}:force_original_aspect_ratio=disable[fg];"
                     f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
-                    f"crop={list_part_width}:{out_height}:0:0[bg];"
+                    f"crop={list_part_width}:{target_scaled_height}:0:0,"
+                    f"scale={part_width}:{out_height}:force_original_aspect_ratio=disable[bg];"
                     f"[bg][fg]hstack=inputs=2[outv]"
                 )
             elif merge_mode == self.MERGE_B_D:
@@ -676,18 +681,23 @@ class VideoProcessor:
                 )
             elif merge_mode == self.MERGE_A_D:
                 list_part_height = _make_even(int(target_scaled_height * target_split_ratio))
+                bg_out_height = out_height - part_height
                 video_filter = (
                     f"[{fg_input}]{fg_scale},crop={out_width}:{part_height}:0:0[fg];"
                     f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{target_scaled_height - list_part_height}:0:{list_part_height}[bg];"
+                    f"crop={target_scaled_width}:{target_scaled_height - list_part_height}:0:{list_part_height},"
+                    f"scale={out_width}:{bg_out_height}:force_original_aspect_ratio=disable[bg];"
                     f"[fg][bg]vstack=inputs=2[outv]"
                 )
             elif merge_mode == self.MERGE_B_C:
                 list_part_height = _make_even(int(target_scaled_height * target_split_ratio))
+                fg_out_height = out_height - part_height
                 video_filter = (
-                    f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
+                    f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height},"
+                    f"scale={out_width}:{fg_out_height}:force_original_aspect_ratio=disable[fg];"
                     f"[{bg_input}]scale={target_scaled_width}:{target_scaled_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{list_part_height}:0:0[bg];"
+                    f"crop={target_scaled_width}:{list_part_height}:0:0,"
+                    f"scale={out_width}:{part_height}:force_original_aspect_ratio=disable[bg];"
                     f"[bg][fg]vstack=inputs=2[outv]"
                 )
             elif merge_mode == self.MERGE_B_D:

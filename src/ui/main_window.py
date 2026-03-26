@@ -89,7 +89,7 @@ class VideoSplitApp(
         self.merge_preview_photo = None  # PhotoImage对象
 
         # 音频配置
-        self.audio_source = tk.StringVar(value="template")
+        self.audio_source = tk.StringVar(value="list")
         self.custom_audio_path = tk.StringVar()
 
         # 音量控制 (0-200, 100=原音量)
@@ -627,10 +627,10 @@ class VideoSplitApp(
         audio_inner.pack(fill=tk.X, pady=2)
 
         ttk.Radiobutton(
-            audio_inner, text="模板音频", variable=self.audio_source, value="template"
+            audio_inner, text="列表音频", variable=self.audio_source, value="list"
         ).pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(
-            audio_inner, text="列表音频", variable=self.audio_source, value="list"
+            audio_inner, text="模板音频", variable=self.audio_source, value="template"
         ).pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(
             audio_inner, text="混合音频", variable=self.audio_source, value="mix"
