@@ -42,11 +42,15 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.2 - Windows 版
+          视频分割拼接工具 V2.4 - Windows 版
 
           使用说明：
           1. 双击运行 VideoSplitTool.exe
           2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          V2.4 更新内容：
+          - 修复分割比例不同时视频高度相加的问题
+          - 默认音频改为列表音频
 
           V2.2 更新内容：
           - 曲线分界线功能（可编辑曲线形状）
@@ -99,14 +103,28 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name VideoSplitTool main.py
 
+      - name: Download FFmpeg for macOS
+        run: |
+          # 下载静态编译的 FFmpeg for macOS (universal binary)
+          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+
+          # 解压并创建目录
+          unzip ffmpeg.zip -d ffmpeg_dir
+          unzip ffprobe.zip -d ffprobe_dir
+
+          mkdir -p dist/ffmpeg/bin
+          cp ffmpeg_dir/ffmpeg dist/ffmpeg/bin/
+          cp ffprobe_dir/ffprobe dist/ffmpeg/bin/
+          chmod +x dist/ffmpeg/bin/ffmpeg dist/ffmpeg/bin/ffprobe
+
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.2 - macOS 版
+          视频分割拼接工具 V2.4 - macOS 版
 
           使用说明：
-          1. 安装 FFmpeg（如果还没有）
-             brew install ffmpeg
+          1. FFmpeg 已内置在 ffmpeg/bin 目录下
 
           2. 双击运行 VideoSplitTool
              如果提示"无法打开"，请在终端执行:
@@ -115,6 +133,11 @@ jobs:
 
           3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
+
+          V2.4 更新内容：
+          - 修复分割比例不同时视频高度相加的问题
+          - 默认音频改为列表音频
+          - macOS 版本内置 FFmpeg
 
           V2.2 更新内容：
           - 曲线分界线功能（可编辑曲线形状）
@@ -139,7 +162,7 @@ jobs:
         run: |
           timestamp=$(date +%Y%m%d)
           cd dist
-          zip -r "../VideoSplitTool_macOS_$timestamp.zip" VideoSplitTool README.txt
+          zip -r "../VideoSplitTool_macOS_$timestamp.zip" VideoSplitTool ffmpeg README.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
