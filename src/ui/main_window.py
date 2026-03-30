@@ -37,7 +37,7 @@ class VideoSplitApp(
 ):
     """视频分割拼接应用 V2.2"""
 
-    VERSION = "2.2"
+    VERSION = "2.5"
 
     def __init__(self, root):
         self.root = root
@@ -59,14 +59,17 @@ class VideoSplitApp(
         self._list_initial_dir = ""      # 列表视频选择目录
         self._output_initial_dir = ""    # 输出目录选择
 
+        # 处理模式
+        self.process_mode = tk.StringVar(value="split")  # "split"=分割拼接, "overlay"=视频叠加
+
         # 拼接部分勾选
-        self.use_part_a = tk.BooleanVar(value=True)
-        self.use_part_b = tk.BooleanVar(value=False)
+        self.use_part_a = tk.BooleanVar(value=False)
+        self.use_part_b = tk.BooleanVar(value=True)
         self.use_part_c = tk.BooleanVar(value=True)
         self.use_part_d = tk.BooleanVar(value=False)
 
         # 位置顺序
-        self.position_order = tk.StringVar(value="template_first")
+        self.position_order = tk.StringVar(value="list_first")
 
         # 输出比例（独立于分割比例，控制输出视频中各部分的大小）
         self.output_ratio = tk.DoubleVar(value=0.5)
@@ -299,8 +302,23 @@ class VideoSplitApp(
         left_frame = ttk.Frame(main_container)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
-        # --- 拼接部分选择 ---
-        merge_inner = ttk.Frame(left_frame)
+        # --- 处理模式选择 ---
+        mode_frame = ttk.Frame(left_frame)
+        mode_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(mode_frame, text="模式:").pack(side=tk.LEFT, padx=3)
+        ttk.Radiobutton(
+            mode_frame, text="分割拼接", variable=self.process_mode,
+            value="split", command=self._on_process_mode_change
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(
+            mode_frame, text="视频叠加", variable=self.process_mode,
+            value="overlay", command=self._on_process_mode_change
+        ).pack(side=tk.LEFT, padx=2)
+
+        # --- 拼接部分选择（分割拼接模式专用）---
+        self.split_widgets_frame = ttk.Frame(left_frame)
+        self.split_widgets_frame.pack(fill=tk.X, pady=2)
+        merge_inner = ttk.Frame(self.split_widgets_frame)
         merge_inner.pack(fill=tk.X, pady=2)
 
         ttk.Label(merge_inner, text="模板:").grid(row=0, column=0, padx=3, sticky='w')
@@ -328,7 +346,7 @@ class VideoSplitApp(
         self.check_d.grid(row=0, column=5, padx=2)
 
         # --- 位置顺序 ---
-        order_frame = ttk.Frame(left_frame)
+        order_frame = ttk.Frame(self.split_widgets_frame)
         order_frame.pack(fill=tk.X, pady=2)
         ttk.Label(order_frame, text="位置:").pack(side=tk.LEFT, padx=3)
         ttk.Radiobutton(
@@ -341,7 +359,7 @@ class VideoSplitApp(
         ).pack(side=tk.LEFT, padx=2)
 
         # --- 输出比例 ---
-        ratio_frame = ttk.Frame(left_frame)
+        ratio_frame = ttk.Frame(self.split_widgets_frame)
         ratio_frame.pack(fill=tk.X, pady=2)
         self.output_ratio_check = ttk.Checkbutton(
             ratio_frame, text="自定义比例",
@@ -365,7 +383,7 @@ class VideoSplitApp(
         self.effect_diagram_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         # --- 曲线分界线设置 ---
-        divider_frame = ttk.Frame(left_frame)
+        divider_frame = ttk.Frame(self.split_widgets_frame)
         divider_frame.pack(fill=tk.X, pady=2)
 
         self.divider_check = ttk.Checkbutton(
@@ -841,8 +859,23 @@ class VideoSplitApp(
         # 更新预览视频下拉列表
         self._update_preview_combo()
 
+    def _on_process_mode_change(self):
+        """处理模式切换"""
+        is_split = self.process_mode.get() == "split"
+        # 显示/隐藏分割拼接相关控件
+        if is_split:
+            self.split_widgets_frame.pack(fill=tk.X, pady=2, after=self.split_widgets_frame.master.winfo_children()[0])
+        else:
+            self.split_widgets_frame.pack_forget()
+        self._on_merge_change()
+
     def _on_merge_change(self):
         """当拼接部分勾选变化时更新预览说明"""
+        # 叠加模式显示固定提示
+        if self.process_mode.get() == "overlay":
+            self.merge_preview_var.set("叠加模式: 模板视频在前（前景），列表视频在后（背景）")
+            self._draw_merge_preview()
+            return
         # 如果分割模式改变且曲线分界线已启用，重置曲线控制点
         if self.divider_enabled.get() and self.divider_curve_points:
             mode = self.split_mode.get()
@@ -1009,6 +1042,8 @@ class VideoSplitApp(
 
     def _get_merge_combinations(self):
         """获取所有拼接组合"""
+        if self.process_mode.get() == "overlay":
+            return ["overlay"]
         template_parts = []
         list_parts = []
 

@@ -245,6 +245,9 @@ class PreviewMixin:
 
     def _simulate_merge(self, template_img, list_img):
         """模拟拼接效果（用PIL实现，支持缩放模式和曲线分界线）"""
+        # 叠加模式：前景居中叠加在背景上
+        if hasattr(self, 'process_mode') and self.process_mode.get() == "overlay":
+            return self._simulate_overlay(template_img, list_img)
         split_ratio = self.split_ratio.get()
         output_ratio = self.output_ratio.get() if self.output_ratio_enabled.get() else 0.5
         is_horizontal = self.split_mode.get() == "horizontal"
@@ -302,6 +305,31 @@ class PreviewMixin:
             merged.paste(second_part, (0, first_h))
 
         return merged
+
+    def _simulate_overlay(self, template_img, list_img):
+        """模拟叠加效果 - 前景视频（模板）居中叠加在背景视频（列表）上"""
+        template_scale_mode = self.template_scale_mode.get()
+        list_scale_mode = self.list_scale_mode.get()
+
+        out_w, out_h = list_img.size
+
+        # 缩放背景（列表视频）
+        bg = self._scale_image_with_mode(list_img, out_w, out_h, list_scale_mode)
+        # 缩放前景（模板视频）
+        fg = self._scale_image_with_mode(template_img, out_w, out_h, template_scale_mode)
+
+        # 如果前景有透明通道，使用 alpha composite
+        if fg.mode == 'RGBA':
+            bg_rgba = bg.convert('RGBA')
+            merged = Image.alpha_composite(bg_rgba, fg)
+            return merged.convert('RGB')
+        else:
+            # 无透明通道，直接居中粘贴
+            merged = bg.copy()
+            paste_x = (out_w - fg.width) // 2
+            paste_y = (out_h - fg.height) // 2
+            merged.paste(fg, (paste_x, paste_y))
+            return merged
 
     def _simulate_merge_with_curve(self, template_img, list_img, out_w, out_h,
                                     template_scale_mode, list_scale_mode, is_template_first):

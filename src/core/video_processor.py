@@ -163,7 +163,8 @@ class VideoProcessor:
         custom_volume: int = 100,
         divider_mask_path: str = None,
         divider_color: str = "#FFFFFF",
-        divider_width: int = 0
+        divider_width: int = 0,
+        process_mode: str = "split"
     ) -> ProcessResult:
         """
         处理视频：分割并拼接
@@ -273,8 +274,21 @@ class VideoProcessor:
                 # 检查是否使用曲线蒙版
                 use_mask = divider_mask_path and os.path.exists(divider_mask_path)
 
+                # 检查是否使用视频叠加模式
+                if process_mode == "overlay":
+                    logger.info("使用视频叠加模式")
+                    filter_complex = self._build_overlay_filter_complex(
+                        out_width, out_height,
+                        template_has_audio, target_has_audio,
+                        audio_source,
+                        scale_mode or "fit",
+                        template_scale_mode,
+                        list_scale_mode,
+                        template_volume,
+                        list_volume
+                    )
                 # 检查是否使用透明通道模式（模板视频有alpha通道时）
-                if template_has_alpha and not use_mask:
+                elif template_has_alpha and not use_mask:
                     logger.info("检测到模板视频有透明通道，使用overlay模式")
                     filter_complex = self._build_alpha_filter_complex(
                         split_mode, merge_mode,
@@ -534,6 +548,71 @@ class VideoProcessor:
             except OSError as e:
                 logger.warning(f"无法删除临时文件 {temp_file}: {e}")
 
+    def _build_overlay_filter_complex(
+        self,
+        out_width: int,
+        out_height: int,
+        template_has_audio: bool = True,
+        target_has_audio: bool = True,
+        audio_source: str = "template",
+        scale_mode: str = "fit",
+        template_scale_mode: str = "fit",
+        list_scale_mode: str = "fit",
+        template_volume: int = 100,
+        list_volume: int = 100
+    ) -> str:
+        """
+        构建视频叠加滤镜 - 前景视频（模板）居中叠加在背景视频（列表）上
+
+        Args:
+            out_width: 输出宽度
+            out_height: 输出高度
+            template_has_audio: 模板是否有音频
+            target_has_audio: 目标是否有音频
+            audio_source: 音频来源
+            scale_mode: 通用缩放模式
+            template_scale_mode: 模板缩放模式
+            list_scale_mode: 列表缩放模式
+            template_volume: 模板音量
+            list_volume: 列表音量
+        """
+        out_width = _make_even(out_width)
+        out_height = _make_even(out_height)
+
+        template_vol = template_volume / 100.0
+        list_vol = list_volume / 100.0
+
+        # 音频滤镜
+        audio_filter = None
+        if audio_source == "mix":
+            if template_has_audio and target_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[a0];[1:a]volume={list_vol}[a1];[a0][a1]amix=inputs=2:duration=longest[outa]"
+            elif template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+            elif target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+        elif audio_source == "template":
+            if template_has_audio:
+                audio_filter = f"[0:a]volume={template_vol}[outa]"
+        elif audio_source == "list":
+            if target_has_audio:
+                audio_filter = f"[1:a]volume={list_vol}[outa]"
+
+        # 缩放滤镜
+        bg_scale = _build_scale_filter(out_width, out_height, list_scale_mode)
+        fg_scale = _build_scale_filter(out_width, out_height, template_scale_mode)
+
+        # [0:v]=模板(前景), [1:v]=列表(背景)
+        video_filter = (
+            f"[1:v]{bg_scale}[bg];"
+            f"[0:v]{fg_scale}[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2:format=yuv420[outv]"
+        )
+
+        if audio_filter:
+            return f"{video_filter};{audio_filter}"
+        return video_filter
+
     def _build_alpha_filter_complex(
         self,
         split_mode: str,
@@ -623,7 +702,7 @@ class VideoProcessor:
                 video_filter = (
                     f"[{bg_input}]{bg_scale},crop={part_width}:{out_height}:0:0[bg];"
                     f"[{fg_input}]{fg_scale},crop={part_width}:{out_height}:0:0[fg];"
-                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                    f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             elif merge_mode == self.MERGE_A_D:
                 # 模板左半 + 列表右半（列表右半没有透明通道，使用普通hstack）
@@ -653,7 +732,7 @@ class VideoProcessor:
                 video_filter = (
                     f"[{bg_input}]{bg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[bg];"
                     f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
-                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                    f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             else:
                 # GRID模式
@@ -677,7 +756,7 @@ class VideoProcessor:
                 video_filter = (
                     f"[{bg_input}]{bg_scale},crop={out_width}:{part_height}:0:0[bg];"
                     f"[{fg_input}]{fg_scale},crop={out_width}:{part_height}:0:0[fg];"
-                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                    f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             elif merge_mode == self.MERGE_A_D:
                 list_part_height = _make_even(int(target_scaled_height * target_split_ratio))
@@ -704,7 +783,7 @@ class VideoProcessor:
                 video_filter = (
                     f"[{bg_input}]{bg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[bg];"
                     f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
-                    f"[bg][fg]overlay=0:0:format=yuva420p[outv]"
+                    f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             else:
                 # GRID模式

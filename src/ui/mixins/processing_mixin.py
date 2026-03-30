@@ -218,7 +218,8 @@ class ProcessingMixin:
                     custom_volume=self.custom_volume.get(),
                     divider_mask_path=divider_mask,
                     divider_color=self.divider_color.get(),
-                    divider_width=self.divider_width.get()
+                    divider_width=self.divider_width.get(),
+                    process_mode=self.process_mode.get()
                 )
 
                 result_name = f"{video_item.name} ({merge_mode.upper()})"
