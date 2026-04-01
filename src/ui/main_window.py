@@ -60,7 +60,7 @@ class VideoSplitApp(
         self._output_initial_dir = ""    # 输出目录选择
 
         # 处理模式
-        self.process_mode = tk.StringVar(value="split")  # "split"=分割拼接, "overlay"=视频叠加
+        self.process_mode = tk.StringVar(value="overlay")  # "split"=分割拼接, "overlay"=视频叠加
 
         # 拼接部分勾选
         self.use_part_a = tk.BooleanVar(value=False)
@@ -230,7 +230,7 @@ class VideoSplitApp(
         ratio_frame = ttk.Frame(left_frame)
         ratio_frame.pack(fill=tk.X, pady=3, padx=10)
         self.ratio_scale = ttk.Scale(
-            ratio_frame, from_=0.1, to=0.9, length=180,
+            ratio_frame, from_=0.0, to=1.0, length=180,
             variable=self.split_ratio, orient=tk.HORIZONTAL,
             command=self._on_ratio_change
         )
