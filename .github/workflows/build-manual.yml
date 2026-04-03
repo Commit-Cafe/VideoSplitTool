@@ -42,11 +42,15 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.5 - Windows 版
+          视频分割拼接工具 V2.5.1 - Windows 版
 
           使用说明：
           1. 双击运行 VideoSplitTool.exe
           2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          V2.5.1 更新内容：
+          - 修复：默认分割方式改为"上下分割"
+          - 修复：视频叠加模式下分割拼接选项显示bug
 
           V2.5 更新内容：
           - 新增视频叠加模式（两个视频全帧叠加播放）
@@ -122,19 +126,23 @@ jobs:
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.5 - macOS 版
-
+          视频分割拼接工具 V2.5.1 - macOS 版
+          
           使用说明：
           1. FFmpeg 已内置在 ffmpeg/bin 目录下
-
+          
           2. 双击运行 VideoSplitTool
              如果提示"无法打开"，请在终端执行:
              chmod +x VideoSplitTool
              ./VideoSplitTool
-
+          
           3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
-
+          
+          V2.5.1 更新内容：
+          - 修复：默认分割方式改为"上下分割"
+          - 修复：视频叠加模式下分割拼接选项显示bug
+          
           V2.5 更新内容：
           - 新增视频叠加模式（两个视频全帧叠加播放）
           - 修复 FFmpeg 8.0 兼容性问题

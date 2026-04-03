@@ -35,9 +35,9 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.2"""
+    """视频分割拼接应用 V2.5.1"""
 
-    VERSION = "2.5"
+    VERSION = "2.5.1"
 
     def __init__(self, root):
         self.root = root
