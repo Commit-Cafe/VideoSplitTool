@@ -48,7 +48,7 @@ class VideoSplitApp(
         # 数据
         self.template_video = tk.StringVar()
         self.video_items: List[VideoItem] = []
-        self.split_mode = tk.StringVar(value="horizontal")
+        self.split_mode = tk.StringVar(value="vertical")
         self.output_dir = tk.StringVar()
         self.split_ratio = tk.DoubleVar(value=0.5)
         self.naming_rule = tk.StringVar(value="time")
@@ -173,7 +173,7 @@ class VideoSplitApp(
         self._create_progress_section(main_frame)
 
         self._draw_placeholder()
-        self._on_merge_change()
+        self._on_process_mode_change()
 
     def _create_template_section(self, parent):
         """创建模板视频选择区域"""
