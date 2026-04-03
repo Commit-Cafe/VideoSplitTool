@@ -5,8 +5,13 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+import json
 from datetime import datetime
 from typing import List
+
+# 配置文件路径
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".video_split_tool")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
 
 from ..models.video_item import VideoItem
 from ..core.video_processor import VideoProcessor
@@ -35,9 +40,9 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.5.1"""
+    """视频分割拼接应用 V2.5.2"""
 
-    VERSION = "2.5.1"
+    VERSION = "2.5.2"
 
     def __init__(self, root):
         self.root = root
@@ -58,6 +63,9 @@ class VideoSplitApp(
         self._template_initial_dir = ""  # 模板视频选择目录
         self._list_initial_dir = ""      # 列表视频选择目录
         self._output_initial_dir = ""    # 输出目录选择
+
+        # 加载保存的目录设置
+        self._load_dialog_dirs()
 
         # 处理模式
         self.process_mode = tk.StringVar(value="overlay")  # "split"=分割拼接, "overlay"=视频叠加
@@ -139,6 +147,32 @@ class VideoSplitApp(
 
         self._create_widgets()
         logger.info(f"程序启动 - V{self.VERSION}")
+
+    def _load_dialog_dirs(self):
+        """从配置文件加载对话框目录"""
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self._template_initial_dir = data.get('template_dir', '')
+                    self._list_initial_dir = data.get('list_dir', '')
+                    self._output_initial_dir = data.get('output_dir', '')
+        except Exception as e:
+            logger.warning(f"加载目录配置失败: {e}")
+
+    def _save_dialog_dirs(self):
+        """保存对话框目录到配置文件"""
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            data = {
+                'template_dir': self._template_initial_dir,
+                'list_dir': self._list_initial_dir,
+                'output_dir': self._output_initial_dir,
+            }
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"保存目录配置失败: {e}")
 
     def _create_widgets(self):
         """创建主界面控件"""
@@ -255,8 +289,17 @@ class VideoSplitApp(
 
     def _create_list_section(self, parent):
         """创建视频列表区域"""
-        list_frame = ttk.LabelFrame(parent, text="视频列表 (C/D) - 双击编辑设置", padding="5")
+        list_frame = ttk.LabelFrame(parent, text="", padding="5")
         list_frame.pack(fill=tk.X, pady=3)
+
+        # 标题行（带数量显示）
+        title_frame = ttk.Frame(list_frame)
+        title_frame.pack(fill=tk.X, pady=(0, 3))
+        self.list_count_label = ttk.Label(
+            title_frame, text="视频列表 (C/D) - 已选 0 个 - 双击编辑设置",
+            font=('Arial', 9, 'bold')
+        )
+        self.list_count_label.pack(side=tk.LEFT, padx=5)
 
         tree_container = ttk.Frame(list_frame)
         tree_container.pack(fill=tk.X, pady=3)
@@ -288,6 +331,9 @@ class VideoSplitApp(
         ttk.Button(btn_frame, text="清空", command=self._clear_list, width=7).pack(side=tk.LEFT, padx=4)
         ttk.Separator(btn_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         ttk.Button(btn_frame, text="应用到全部", command=self._apply_to_all, width=10).pack(side=tk.LEFT, padx=4)
+
+        # 更新视频数量显示
+        self._update_list_count()
 
     def _create_merge_section(self, parent):
         """创建拼接设置区域（左侧设置 + 右侧预览）"""
@@ -858,6 +904,14 @@ class VideoSplitApp(
 
         # 更新预览视频下拉列表
         self._update_preview_combo()
+
+        # 更新视频数量显示
+        self._update_list_count()
+
+    def _update_list_count(self):
+        """更新视频列表数量显示"""
+        count = len(self.video_items)
+        self.list_count_label.config(text=f"视频列表 (C/D) - 已选 {count} 个 - 双击编辑设置")
 
     def _on_process_mode_change(self):
         """处理模式切换"""

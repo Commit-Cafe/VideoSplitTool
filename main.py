@@ -32,8 +32,12 @@ def main():
             if messagebox.askokcancel("退出确认",
                 "正在处理视频，强制退出可能导致输出文件损坏。\n\n确定要退出吗？"):
                 logger.warning("用户强制退出程序（处理进行中）")
+                # 保存目录配置
+                app._save_dialog_dirs()
                 root.destroy()
         else:
+            # 保存目录配置
+            app._save_dialog_dirs()
             logger.info("用户正常退出程序")
             root.destroy()
 

@@ -1,4 +1,4 @@
-name: Build (Manual Download)
+刷新name: Build (Manual Download)
 
 # 这个工作流用于手动触发，不会创建 Release
 # 构建完成后从 Artifacts 下载
@@ -42,11 +42,15 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.5.1 - Windows 版
+          视频分割拼接工具 V2.5.2 - Windows 版
 
           使用说明：
           1. 双击运行 VideoSplitTool.exe
           2. FFmpeg 已内置在 ffmpeg/bin 目录下
+
+          V2.5.2 更新内容：
+          - 新增：目录记忆功能（模板视频、视频列表、输出目录选择时记住上次打开的目录）
+          - 新增：视频列表显示已选视频数量
 
           V2.5.1 更新内容：
           - 修复：默认分割方式改为"上下分割"
@@ -126,7 +130,7 @@ jobs:
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.5.1 - macOS 版
+          视频分割拼接工具 V2.5.2 - macOS 版
           
           使用说明：
           1. FFmpeg 已内置在 ffmpeg/bin 目录下
@@ -138,6 +142,10 @@ jobs:
           
           3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
+          
+          V2.5.2 更新内容：
+          - 新增：目录记忆功能（模板视频、视频列表、输出目录选择时记住上次打开的目录）
+          - 新增：视频列表显示已选视频数量
           
           V2.5.1 更新内容：
           - 修复：默认分割方式改为"上下分割"

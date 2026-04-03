@@ -42,6 +42,29 @@ class AudioSource(Enum):
 
 
 @dataclass
+class DialogDirsConfig:
+    """对话框目录配置"""
+    template_dir: str = ""      # 模板视频选择目录
+    list_dir: str = ""          # 列表视频选择目录
+    output_dir: str = ""        # 输出目录
+
+    def to_dict(self) -> dict:
+        return {
+            'template_dir': self.template_dir,
+            'list_dir': self.list_dir,
+            'output_dir': self.output_dir,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DialogDirsConfig':
+        return cls(
+            template_dir=data.get('template_dir', ''),
+            list_dir=data.get('list_dir', ''),
+            output_dir=data.get('output_dir', ''),
+        )
+
+
+@dataclass
 class MergeConfig:
     """拼接配置"""
     use_part_a: bool = True   # 使用模板左/上部分
@@ -95,6 +118,7 @@ class AppConfig:
         output_config: 输出配置
         audio_source: 音频来源
         custom_audio_path: 自定义音频路径
+        dialog_dirs: 对话框目录配置
     """
     template_video: str = ""
     output_dir: str = ""
@@ -105,6 +129,7 @@ class AppConfig:
     output_config: OutputConfig = field(default_factory=OutputConfig)
     audio_source: str = "template"
     custom_audio_path: Optional[str] = None
+    dialog_dirs: DialogDirsConfig = field(default_factory=DialogDirsConfig)
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -127,7 +152,8 @@ class AppConfig:
                 'scale_mode': self.output_config.scale_mode,
             },
             'audio_source': self.audio_source,
-            'custom_audio_path': self.custom_audio_path
+            'custom_audio_path': self.custom_audio_path,
+            'dialog_dirs': self.dialog_dirs.to_dict(),
         }
 
     @classmethod
@@ -135,6 +161,7 @@ class AppConfig:
         """从字典创建实例"""
         merge_data = data.get('merge_config', {})
         output_data = data.get('output_config', {})
+        dialog_dirs_data = data.get('dialog_dirs', {})
 
         return cls(
             template_video=data.get('template_video', ''),
@@ -155,5 +182,6 @@ class AppConfig:
                 scale_mode=output_data.get('scale_mode', 'fit'),
             ),
             audio_source=data.get('audio_source', 'template'),
-            custom_audio_path=data.get('custom_audio_path')
+            custom_audio_path=data.get('custom_audio_path'),
+            dialog_dirs=DialogDirsConfig.from_dict(dialog_dirs_data),
         )
