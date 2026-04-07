@@ -239,12 +239,45 @@ class ProcessingMixin:
             self.status_var.set("正在停止...")
             logger.info("用户请求停止处理")
 
+    def _notify_complete(self, success_count, total_tasks):
+        try:
+            if os.name == 'nt':
+                import ctypes
+                import winsound
+                FLASHW_ALL = 3
+                FLASHW_TIMERNOFG = 12
+                class FLASHWINFO(ctypes.Structure):
+                    _fields_ = [
+                        ('cbSize', ctypes.c_uint),
+                        ('hwnd', ctypes.c_void_p),
+                        ('dwFlags', ctypes.c_uint),
+                        ('uCount', ctypes.c_uint),
+                        ('dwTimeout', ctypes.c_uint),
+                    ]
+                hwnd = int(self.root.winfo_id())
+                fi = FLASHWINFO()
+                fi.cbSize = ctypes.sizeof(fi)
+                fi.hwnd = hwnd
+                fi.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG
+                fi.uCount = 5
+                fi.dwTimeout = 0
+                ctypes.windll.user32.FlashWindowEx(ctypes.byref(fi))
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            else:
+                self.root.bell()
+        except Exception:
+            try:
+                self.root.bell()
+            except Exception:
+                pass
+
     def _on_processing_complete(self, results, success_count, total_tasks, stopped=False):
         """处理完成后的回调"""
         self.is_processing = False
         self.processing_stopped = False
         self.start_btn.config(state='normal', text="开始处理")
         self.stop_btn.config(state='disabled')
+        self._notify_complete(success_count, total_tasks)
         if stopped:
             messagebox.showinfo("处理已停止", f"已完成 {success_count}/{total_tasks} 个任务")
         else:

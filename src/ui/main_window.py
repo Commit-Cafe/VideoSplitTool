@@ -6,12 +6,14 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import json
+import time
 from datetime import datetime
 from typing import List
 
 # 配置文件路径
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".video_split_tool")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
+_instance_id = f"{int(time.time() * 1000) % 100000000}"
+CONFIG_FILE = os.path.join(CONFIG_DIR, f"settings_{_instance_id}.json")
 
 from ..models.video_item import VideoItem
 from ..core.video_processor import VideoProcessor
@@ -40,9 +42,9 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.5.2"""
+    """视频分割拼接应用 V2.5.3"""
 
-    VERSION = "2.5.2"
+    VERSION = "2.5.3"
 
     def __init__(self, root):
         self.root = root
