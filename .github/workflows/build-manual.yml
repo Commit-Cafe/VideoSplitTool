@@ -1,4 +1,4 @@
-刷新name: Build (Manual Download)
+name: Build (Manual Download)
 
 # 这个工作流用于手动触发，不会创建 Release
 # 构建完成后从 Artifacts 下载
