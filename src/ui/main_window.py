@@ -6,14 +6,12 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import json
-import time
 from datetime import datetime
 from typing import List
 
 # 配置文件路径
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".video_split_tool")
-_instance_id = f"{int(time.time() * 1000) % 100000000}"
-CONFIG_FILE = os.path.join(CONFIG_DIR, f"settings_{_instance_id}.json")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
 
 from ..models.video_item import VideoItem
 from ..core.video_processor import VideoProcessor
