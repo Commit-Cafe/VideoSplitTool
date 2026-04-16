@@ -28,8 +28,11 @@ class AudioMixin:
 
     def _select_custom_audio(self):
         """选择自定义音频文件"""
+        # 热更新：从配置文件重新读取最新目录（支持多实例间同步）
+        self._load_dialog_dirs()
         file_path = filedialog.askopenfilename(
             title="选择音频文件",
+            initialdir=self._template_initial_dir,  # 使用模板目录作为初始目录
             filetypes=[
                 ("音频文件", "*.mp3 *.wav *.aac *.m4a *.flac *.ogg"),
                 ("视频文件", "*.mp4 *.avi *.mkv *.mov"),

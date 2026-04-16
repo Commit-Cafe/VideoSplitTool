@@ -40,9 +40,9 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.5.3"""
+    """视频分割拼接应用 V2.5.4"""
 
-    VERSION = "2.5.3"
+    VERSION = "2.5.4"
 
     def __init__(self, root):
         self.root = root
@@ -1119,6 +1119,8 @@ class VideoSplitApp(
 
     def _select_template(self):
         """选择模板视频"""
+        # 热更新：从配置文件重新读取最新目录（支持多实例间同步）
+        self._load_dialog_dirs()
         file_path = filedialog.askopenfilename(
             title="选择模板视频",
             initialdir=self._template_initial_dir,
@@ -1159,6 +1161,8 @@ class VideoSplitApp(
 
     def _add_videos(self):
         """添加视频"""
+        # 热更新：从配置文件重新读取最新目录（支持多实例间同步）
+        self._load_dialog_dirs()
         files = filedialog.askopenfilenames(
             title="选择视频",
             initialdir=self._list_initial_dir,
@@ -1194,6 +1198,8 @@ class VideoSplitApp(
 
     def _select_output_dir(self):
         """选择输出目录"""
+        # 热更新：从配置文件重新读取最新目录（支持多实例间同步）
+        self._load_dialog_dirs()
         dir_path = filedialog.askdirectory(
             title="选择输出目录",
             initialdir=self._output_initial_dir

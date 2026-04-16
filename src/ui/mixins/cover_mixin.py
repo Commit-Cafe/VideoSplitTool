@@ -143,8 +143,11 @@ class CoverMixin:
 
     def _select_cover_image(self):
         """选择封面图片"""
+        # 热更新：从配置文件重新读取最新目录（支持多实例间同步）
+        self._load_dialog_dirs()
         file_path = filedialog.askopenfilename(
             title="选择封面图片",
+            initialdir=self._template_initial_dir,  # 使用模板目录作为初始目录
             filetypes=[
                 ("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif"),
                 ("所有文件", "*.*")

@@ -106,43 +106,61 @@ class PreviewMixin:
             if 0 <= idx < len(self.video_items):
                 list_video_path = self.video_items[idx].path
 
-        # 获取当前封面类型
+        # 获取当前封面类型和处理模式
         cover_type = self.global_cover_type.get()
+        is_overlay_mode = hasattr(self, 'process_mode') and self.process_mode.get() == "overlay"
 
         try:
             temp_dir = get_temp_dir()
             frame_time = self.global_cover_frame_time.get()
 
-            # 根据封面类型决定显示内容
+            # 如果没有列表视频，显示提示
+            if not list_video_path:
+                canvas.delete("all")
+                canvas.create_text(
+                    canvas_w // 2, canvas_h // 2,
+                    text="请添加列表视频", fill='#f66', font=('Arial', 10)
+                )
+                return
+
+            # 提取模板帧
+            template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
+            if not FFmpegHelper.extract_frame(template_path, template_frame_path, frame_time):
+                raise Exception("无法提取模板帧")
+            template_img = Image.open(template_frame_path)
+
+            # 提取列表帧
+            list_frame_path = os.path.join(temp_dir, "preview_list.jpg")
+            if not FFmpegHelper.extract_frame(list_video_path, list_frame_path, frame_time):
+                raise Exception("无法提取列表帧")
+            list_img = Image.open(list_frame_path)
+
+            # 叠加模式下，始终显示叠加预览效果
+            if is_overlay_mode:
+                # 叠加模式：模拟叠加效果
+                merged_img = self._simulate_merge(template_img, list_img)
+                merged_img.thumbnail((canvas_w - 10, canvas_h - 10), Image.Resampling.LANCZOS)
+                self.merge_preview_image = merged_img
+                self.merge_preview_photo = ImageTk.PhotoImage(merged_img)
+                self._draw_merge_preview()
+                self.merge_preview_var.set("预览: 叠加效果")
+                return
+
+            # 分割拼接模式下，根据封面类型决定显示内容
             if cover_type == "template":
-                # 模板帧 - 只显示模板视频
-                template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
-                if not FFmpegHelper.extract_frame(template_path, template_frame_path, frame_time):
-                    raise Exception("无法提取模板帧")
-                preview_img = Image.open(template_frame_path)
-                preview_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = preview_img
-                self.merge_preview_photo = ImageTk.PhotoImage(preview_img)
+                # 模板帧 - 显示模板视频
+                template_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
+                self.merge_preview_image = template_img
+                self.merge_preview_photo = ImageTk.PhotoImage(template_img)
                 self._draw_merge_preview()
                 self.merge_preview_var.set("预览: 模板视频帧")
                 return
 
             elif cover_type == "list":
-                # 列表帧 - 只显示列表视频
-                if not list_video_path:
-                    canvas.delete("all")
-                    canvas.create_text(
-                        canvas_w // 2, canvas_h // 2,
-                        text="请添加列表视频", fill='#f66', font=('Arial', 10)
-                    )
-                    return
-                list_frame_path = os.path.join(temp_dir, "preview_list.jpg")
-                if not FFmpegHelper.extract_frame(list_video_path, list_frame_path, frame_time):
-                    raise Exception("无法提取列表帧")
-                preview_img = Image.open(list_frame_path)
-                preview_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = preview_img
-                self.merge_preview_photo = ImageTk.PhotoImage(preview_img)
+                # 列表帧 - 显示列表视频
+                list_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
+                self.merge_preview_image = list_img
+                self.merge_preview_photo = ImageTk.PhotoImage(list_img)
                 self._draw_merge_preview()
                 self.merge_preview_var.set("预览: 列表视频帧")
                 return
