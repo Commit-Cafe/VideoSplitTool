@@ -1132,6 +1132,7 @@ class VideoSplitApp(
         if file_path:
             self.template_video.set(file_path)
             self._template_initial_dir = os.path.dirname(file_path)  # 记住目录
+            self._save_dialog_dirs()  # 保存到配置文件，实现多实例同步
             self._load_preview(file_path)
             if not self.output_dir.get():
                 self.output_dir.set(os.path.dirname(file_path))
@@ -1178,6 +1179,8 @@ class VideoSplitApp(
                 self.video_items.append(video_item)
                 # 记住最后一个文件的目录
                 self._list_initial_dir = os.path.dirname(f)
+        if files:
+            self._save_dialog_dirs()  # 保存到配置文件，实现多实例同步
         self._refresh_tree()
         self._update_list_video_info()
 
@@ -1207,6 +1210,7 @@ class VideoSplitApp(
         if dir_path:
             self.output_dir.set(dir_path)
             self._output_initial_dir = dir_path  # 记住目录
+            self._save_dialog_dirs()  # 保存到配置文件，实现多实例同步
 
     # 音频相关方法已移至 AudioMixin
 
