@@ -5,7 +5,6 @@
 import subprocess
 import os
 import uuid
-import shutil
 from typing import Callable, Optional
 from dataclasses import dataclass
 
@@ -339,10 +338,12 @@ class VideoProcessor:
             except ValueError as e:
                 return ProcessResult(False, error=str(e))
 
-            # 构建FFmpeg命令
+            temp_output_path = output_path + f".tmp_{uuid.uuid4().hex[:8]}"
+
             ffmpeg = get_ffmpeg_path()
             cmd = [
                 ffmpeg, '-y',
+                '-fflags', '+genpts',
                 '-stream_loop', '-1', '-i', template_video,
                 '-stream_loop', '-1', '-i', target_video,
             ]
@@ -394,7 +395,8 @@ class VideoProcessor:
                     '-c:v', 'prores_ks',
                     '-profile:v', '4444',
                     '-pix_fmt', 'yuva444p10le',
-                    output_path
+                    '-avoid_negative_ts', 'make_zero',
+                    temp_output_path
                 ])
                 logger.info("使用ProRes 4444编码（支持透明通道）")
             else:
@@ -403,7 +405,9 @@ class VideoProcessor:
                     '-c:v', 'libx264',
                     '-preset', 'medium',
                     '-crf', '23',
-                    output_path
+                    '-avoid_negative_ts', 'make_zero',
+                    '-movflags', '+faststart',
+                    temp_output_path
                 ])
 
             self._report_progress(0.2, "处理视频")
@@ -412,7 +416,11 @@ class VideoProcessor:
 
             if not success:
                 self._report_progress(0, "处理失败")
+                self._safe_remove(temp_output_path)
                 return ProcessResult(False, error=error_msg)
+
+            if not self._safe_rename(temp_output_path, output_path):
+                return ProcessResult(False, error=f"无法重命名临时文件到目标路径: {output_path}")
 
             # 处理封面
             if cover_type != "none" and success:
@@ -510,6 +518,7 @@ class VideoProcessor:
                     '-b:a', '128k',
                     '-preset', 'medium',
                     '-crf', '23',
+                    '-movflags', '+faststart',
                     final_output
                 ]
             else:
@@ -525,13 +534,14 @@ class VideoProcessor:
                     '-c:v', 'libx264',
                     '-preset', 'medium',
                     '-crf', '23',
+                    '-movflags', '+faststart',
                     final_output
                 ]
 
             success, error_msg = self._run_ffmpeg(cmd, "添加封面")
 
             if success:
-                shutil.move(final_output, video_path)
+                self._safe_rename(final_output, video_path)
                 return ProcessResult(True)
             else:
                 return ProcessResult(False, error=f"添加封面失败: {error_msg}")
@@ -547,6 +557,33 @@ class VideoProcessor:
                     os.remove(temp_file)
             except OSError as e:
                 logger.warning(f"无法删除临时文件 {temp_file}: {e}")
+
+    @staticmethod
+    def _safe_rename(src: str, dst: str, retries: int = 5) -> bool:
+        """安全重命名文件，支持重试"""
+        for attempt in range(retries):
+            try:
+                if os.path.exists(dst):
+                    os.remove(dst)
+                os.rename(src, dst)
+                return True
+            except OSError as e:
+                if attempt < retries - 1:
+                    import time
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    logger.error(f"重命名文件失败 (尝试{retries}次): {src} -> {dst}, 错误: {e}")
+                    return False
+        return False
+
+    @staticmethod
+    def _safe_remove(path: str):
+        """安全删除文件"""
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            logger.warning(f"无法删除文件 {path}: {e}")
 
     def _build_overlay_filter_complex(
         self,

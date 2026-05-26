@@ -40,9 +40,9 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.5.5"""
+    """视频分割拼接应用 V2.5.6"""
 
-    VERSION = "2.5.5"
+    VERSION = "2.5.6"
 
     def __init__(self, root):
         self.root = root
@@ -1236,18 +1236,21 @@ class VideoSplitApp(
         self.naming_preview_var.set(f"示例: {preview}")
 
     def _generate_output_filename(self, original_name: str, index: int) -> str:
-        """生成输出文件名"""
+        """生成输出文件名（支持多实例并发，避免文件名冲突）"""
+        import os
         rule = self.naming_combo.get()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pid_tag = f"{os.getpid():05d}"
+        ms_tag = f"{datetime.now().microsecond // 1000:03d}"
         if rule == "时间戳":
-            return f"{timestamp}_{index:03d}.mp4"
+            return f"{timestamp}_{pid_tag}_{ms_tag}_{index:03d}.mp4"
         elif rule == "原文件名_merged":
-            return f"{original_name}_merged.mp4"
+            return f"{original_name}_{pid_tag}_merged.mp4"
         elif rule == "自定义前缀_序号":
             prefix = self.custom_prefix.get() or "video"
-            return f"{prefix}_{index:03d}.mp4"
+            return f"{prefix}_{pid_tag}_{ms_tag}_{index:03d}.mp4"
         else:
-            return f"{original_name}_{timestamp}.mp4"
+            return f"{original_name}_{timestamp}_{pid_tag}.mp4"
 
     # 处理相关方法已移至 ProcessingMixin
 
