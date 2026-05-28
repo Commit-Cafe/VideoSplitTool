@@ -1,5 +1,5 @@
 """
-视频分割拼接工具 V2.2 - 主入口
+视频分割拼接工具 V2.6.2 - 主入口
 """
 import tkinter as tk
 from tkinter import messagebox

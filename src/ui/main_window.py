@@ -40,7 +40,7 @@ class VideoSplitApp(
     AudioMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.5.6"""
+    """视频分割拼接应用 V2.6.2"""
 
     VERSION = "2.5.6"
 
