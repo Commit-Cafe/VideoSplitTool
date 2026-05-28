@@ -105,17 +105,6 @@ class ErrorDiagnostics:
                 ]
             )
 
-        # 滤镜错误
-        if "filter" in stderr_lower or "scale" in stderr_lower:
-            return (
-                "视频滤镜处理失败",
-                [
-                    "视频尺寸可能异常(0x0或过大)",
-                    "尝试调整分割比例",
-                    "检查视频文件是否完整"
-                ]
-            )
-
         # 权限错误
         if "permission denied" in stderr_lower or "access denied" in stderr_lower:
             return (
@@ -150,7 +139,7 @@ class ErrorDiagnostics:
                 ]
             )
 
-        # 封面相关错误
+        # 封面相关错误（concat + anullsrc）
         if "anullsrc" in stderr_lower or "concat" in stderr_lower:
             return (
                 "封面处理失败",
@@ -158,6 +147,31 @@ class ErrorDiagnostics:
                     "暂时不使用封面功能",
                     "检查封面时长设置（不要过长）",
                     "确保主视频有音频（如果选择了音频选项）"
+                ]
+            )
+
+        # 滤镜处理错误（放在具体诊断之后，作为兜底）
+        # 使用更精确的匹配模式，避免误判编码器/流信息中的filter/scale关键词
+        filter_error_patterns = [
+            "no such filter",
+            "invalid filter",
+            "filtergraph",
+            "filter_complex",
+            "error while filtering",
+            "error initializing filter",
+            "impossible to convert between the formats",
+            "failed to configure",
+            "unrecognized option",
+            "option not found",
+        ]
+        if any(pattern in stderr_lower for pattern in filter_error_patterns):
+            return (
+                "视频滤镜处理失败",
+                [
+                    "视频尺寸可能异常(0x0或过大)",
+                    "尝试调整分割比例",
+                    "检查视频文件是否完整",
+                    "查看下方FFmpeg原始错误获取详细信息"
                 ]
             )
 

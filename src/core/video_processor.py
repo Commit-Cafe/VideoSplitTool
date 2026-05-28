@@ -22,9 +22,10 @@ class ProcessResult:
     error: str = ""
 
 
-def _make_even(n: int) -> int:
-    """确保数值是偶数（libx264要求宽高必须是偶数）"""
-    return n if n % 2 == 0 else n - 1
+def _make_even(n: int, min_value: int = 2) -> int:
+    """确保数值是偶数（libx264要求宽高必须是偶数），最小值为2"""
+    result = n if n % 2 == 0 else n - 1
+    return max(result, min_value)
 
 
 def _build_scale_filter(width: int, height: int, mode: str = "stretch") -> str:
@@ -97,7 +98,6 @@ class VideoProcessor:
             context: 上下文信息（用于错误诊断）
         """
         try:
-            self._report_progress(0, f"正在{description}...")
             logger.info(f"执行FFmpeg命令: {description}")
             logger.debug(f"FFmpeg命令: {' '.join(cmd)}")
 
@@ -112,7 +112,7 @@ class VideoProcessor:
 
             if result.returncode != 0:
                 logger.error(f"FFmpeg执行失败，返回码: {result.returncode}")
-                logger.debug(f"FFmpeg stderr: {result.stderr}")
+                logger.error(f"FFmpeg stderr:\n{result.stderr}")
 
                 # 使用智能错误诊断
                 error_desc, suggestions = ErrorDiagnostics.diagnose_ffmpeg_error(
@@ -120,6 +120,12 @@ class VideoProcessor:
                     context
                 )
                 error_msg = format_error_message(error_desc, suggestions)
+
+                # 附加FFmpeg原始错误最后几行，方便定位具体原因
+                key_error = ErrorDiagnostics._extract_key_error(result.stderr)
+                if key_error:
+                    error_msg += f"\n\nFFmpeg原始错误:\n{key_error}"
+
                 return False, error_msg
 
             logger.info(f"FFmpeg执行成功: {description}")
@@ -237,6 +243,12 @@ class VideoProcessor:
                 out_width = template_info.width
                 out_height = template_info.height
                 logger.info(f"使用模板视频尺寸: {out_width}x{out_height}")
+
+            # 确保输出尺寸足够大（分割比例最小0.1，每部分至少需要2px）
+            out_width = _make_even(out_width)
+            out_height = _make_even(out_height)
+            if out_width < 4 or out_height < 4:
+                return ProcessResult(False, error=f"输出尺寸过小({out_width}x{out_height})，至少需要4x4像素")
 
             # 根据 duration_mode 确定输出时长
             if duration_mode == "list":
@@ -1064,7 +1076,27 @@ class VideoProcessor:
         list_scale_mode: str = "fit"
     ) -> str:
         """构建水平分割滤镜"""
-        # 根据缩放模式生成最终缩放滤镜
+        # 验证所有尺寸参数为正数，防止FFmpeg crop滤镜报错
+        dims = {
+            'out_width': out_width, 'out_height': out_height,
+            'part_a_width': part_a_width, 'part_b_width': part_b_width,
+            'target_width': target_width, 'target_height': target_height,
+            'part_c_width': part_c_width, 'part_d_width': part_d_width
+        }
+        for name, val in dims.items():
+            if val < 2:
+                raise ValueError(f"滤镜参数{name}={val}过小（最小需要2px），请调整分割比例或输出尺寸")
+
+        # 验证部分之和不超过总宽度
+        if part_a_width + part_b_width > out_width or part_c_width + part_d_width > target_width:
+            raise ValueError(
+                f"滤镜参数不合法：裁剪区域宽度超出范围 "
+                f"(A+B={part_a_width + part_b_width}/{out_width}, C+D={part_c_width + part_d_width}/{target_width})"
+            )
+
+        # 计算安全偏移量（确保不为负数）
+        cb_offset = max(0, target_width - part_d_width)
+        tb_offset = max(0, out_width - part_b_width)
         t_scale_left = _build_scale_filter(part_a_width, out_height, template_scale_mode)
         t_scale_right = _build_scale_filter(part_b_width, out_height, template_scale_mode)
         l_scale_left = _build_scale_filter(part_a_width, out_height, list_scale_mode)
@@ -1098,7 +1130,7 @@ class VideoProcessor:
                 # 列表D在左，模板A在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
+                    f"crop={part_d_width}:{target_height}:{cb_offset}:0,"
                     f"{l_scale_left}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_a_width}:{out_height}:0:0,"
@@ -1112,7 +1144,7 @@ class VideoProcessor:
                     f"crop={part_a_width}:{out_height}:0:0,"
                     f"{t_scale_left}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
+                    f"crop={part_d_width}:{target_height}:{cb_offset}:0,"
                     f"{l_scale_right}[vd];"
                     f"[va][vd]hstack=inputs=2[outv]"
                 )
@@ -1124,7 +1156,7 @@ class VideoProcessor:
                     f"crop={part_c_width}:{target_height}:0:0,"
                     f"{l_scale_left}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"crop={part_b_width}:{out_height}:{tb_offset}:0,"
                     f"{t_scale_right}[vb];"
                     f"[vc][vb]hstack=inputs=2[outv]"
                 )
@@ -1132,7 +1164,7 @@ class VideoProcessor:
                 # 模板B在左，列表C在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"crop={part_b_width}:{out_height}:{tb_offset}:0,"
                     f"{t_scale_left}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={part_c_width}:{target_height}:0:0,"
@@ -1144,10 +1176,10 @@ class VideoProcessor:
                 # 列表D在左，模板B在右
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
+                    f"crop={part_d_width}:{target_height}:{cb_offset}:0,"
                     f"{l_scale_left}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"crop={part_b_width}:{out_height}:{tb_offset}:0,"
                     f"{t_scale_right}[vb];"
                     f"[vd][vb]hstack=inputs=2[outv]"
                 )
@@ -1155,10 +1187,10 @@ class VideoProcessor:
                 # 模板B在左，列表D在右
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,"
+                    f"crop={part_b_width}:{out_height}:{tb_offset}:0,"
                     f"{t_scale_left}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,"
+                    f"crop={part_d_width}:{target_height}:{cb_offset}:0,"
                     f"{l_scale_right}[vd];"
                     f"[vb][vd]hstack=inputs=2[outv]"
                 )
@@ -1169,11 +1201,11 @@ class VideoProcessor:
                 f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
                 f"crop={part_a_width}:{out_height}:0:0,scale={half_width}:{half_height}[va];"
                 f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                f"crop={part_b_width}:{out_height}:{out_width}-{part_b_width}:0,scale={half_width}:{half_height}[vb];"
+                f"crop={part_b_width}:{out_height}:{tb_offset}:0,scale={half_width}:{half_height}[vb];"
                 f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                 f"crop={part_c_width}:{target_height}:0:0,scale={half_width}:{half_height}[vc];"
                 f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                f"crop={part_d_width}:{target_height}:{target_width}-{part_d_width}:0,scale={half_width}:{half_height}[vd];"
+                f"crop={part_d_width}:{target_height}:{cb_offset}:0,scale={half_width}:{half_height}[vd];"
                 f"[va][vb]hstack=inputs=2[top];"
                 f"[vc][vd]hstack=inputs=2[bottom];"
                 f"[top][bottom]vstack=inputs=2[outv]"
@@ -1191,7 +1223,27 @@ class VideoProcessor:
         list_scale_mode: str = "fit"
     ) -> str:
         """构建垂直分割滤镜"""
-        # 根据缩放模式生成最终缩放滤镜
+        # 验证所有尺寸参数为正数，防止FFmpeg crop滤镜报错
+        dims = {
+            'out_width': out_width, 'out_height': out_height,
+            'part_a_height': part_a_height, 'part_b_height': part_b_height,
+            'target_width': target_width, 'target_height': target_height,
+            'part_c_height': part_c_height, 'part_d_height': part_d_height
+        }
+        for name, val in dims.items():
+            if val < 2:
+                raise ValueError(f"滤镜参数{name}={val}过小（最小需要2px），请调整分割比例或输出尺寸")
+
+        # 验证部分之和不超过总高度
+        if part_a_height + part_b_height > out_height or part_c_height + part_d_height > target_height:
+            raise ValueError(
+                f"滤镜参数不合法：裁剪区域高度超出范围 "
+                f"(A+B={part_a_height + part_b_height}/{out_height}, C+D={part_c_height + part_d_height}/{target_height})"
+            )
+
+        # 计算安全偏移量（确保不为负数）
+        cd_offset = max(0, target_height - part_d_height)
+        tb_offset = max(0, out_height - part_b_height)
         t_scale_top = _build_scale_filter(out_width, part_a_height, template_scale_mode)
         t_scale_bottom = _build_scale_filter(out_width, part_b_height, template_scale_mode)
         l_scale_top = _build_scale_filter(out_width, part_a_height, list_scale_mode)
@@ -1225,7 +1277,7 @@ class VideoProcessor:
                 # 列表D在上，模板A在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
+                    f"crop={target_width}:{part_d_height}:0:{cd_offset},"
                     f"{l_scale_top}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
                     f"crop={out_width}:{part_a_height}:0:0,"
@@ -1239,7 +1291,7 @@ class VideoProcessor:
                     f"crop={out_width}:{part_a_height}:0:0,"
                     f"{t_scale_top}[va];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
+                    f"crop={target_width}:{part_d_height}:0:{cd_offset},"
                     f"{l_scale_bottom}[vd];"
                     f"[va][vd]vstack=inputs=2[outv]"
                 )
@@ -1251,7 +1303,7 @@ class VideoProcessor:
                     f"crop={target_width}:{part_c_height}:0:0,"
                     f"{l_scale_top}[vc];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"crop={out_width}:{part_b_height}:0:{tb_offset},"
                     f"{t_scale_bottom}[vb];"
                     f"[vc][vb]vstack=inputs=2[outv]"
                 )
@@ -1259,7 +1311,7 @@ class VideoProcessor:
                 # 模板B在上，列表C在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"crop={out_width}:{part_b_height}:0:{tb_offset},"
                     f"{t_scale_top}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                     f"crop={target_width}:{part_c_height}:0:0,"
@@ -1271,10 +1323,10 @@ class VideoProcessor:
                 # 列表D在上，模板B在下
                 return (
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
+                    f"crop={target_width}:{part_d_height}:0:{cd_offset},"
                     f"{l_scale_top}[vd];"
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"crop={out_width}:{part_b_height}:0:{tb_offset},"
                     f"{t_scale_bottom}[vb];"
                     f"[vd][vb]vstack=inputs=2[outv]"
                 )
@@ -1282,10 +1334,10 @@ class VideoProcessor:
                 # 模板B在上，列表D在下
                 return (
                     f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                    f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},"
+                    f"crop={out_width}:{part_b_height}:0:{tb_offset},"
                     f"{t_scale_top}[vb];"
                     f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                    f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},"
+                    f"crop={target_width}:{part_d_height}:0:{cd_offset},"
                     f"{l_scale_bottom}[vd];"
                     f"[vb][vd]vstack=inputs=2[outv]"
                 )
@@ -1296,11 +1348,11 @@ class VideoProcessor:
                 f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
                 f"crop={out_width}:{part_a_height}:0:0,scale={half_width}:{half_height}[va];"
                 f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=disable,"
-                f"crop={out_width}:{part_b_height}:0:{out_height}-{part_b_height},scale={half_width}:{half_height}[vb];"
+                f"crop={out_width}:{part_b_height}:0:{tb_offset},scale={half_width}:{half_height}[vb];"
                 f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
                 f"crop={target_width}:{part_c_height}:0:0,scale={half_width}:{half_height}[vc];"
                 f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=disable,"
-                f"crop={target_width}:{part_d_height}:0:{target_height}-{part_d_height},scale={half_width}:{half_height}[vd];"
+                f"crop={target_width}:{part_d_height}:0:{cd_offset},scale={half_width}:{half_height}[vd];"
                 f"[va][vb]hstack=inputs=2[top];"
                 f"[vc][vd]hstack=inputs=2[bottom];"
                 f"[top][bottom]vstack=inputs=2[outv]"
