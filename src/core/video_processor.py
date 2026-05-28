@@ -352,7 +352,8 @@ class VideoProcessor:
             except ValueError as e:
                 return ProcessResult(False, error=str(e))
 
-            temp_output_path = output_path + f".tmp_{uuid.uuid4().hex[:8]}"
+            base_name, ext = os.path.splitext(output_path)
+            temp_output_path = f"{base_name}.tmp_{uuid.uuid4().hex[:8]}{ext}"
 
             # 确保输出目录存在
             output_dir = os.path.dirname(os.path.abspath(output_path))
