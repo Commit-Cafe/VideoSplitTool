@@ -352,6 +352,19 @@ class VideoProcessor:
 
             temp_output_path = output_path + f".tmp_{uuid.uuid4().hex[:8]}"
 
+            # 确保输出目录存在
+            output_dir = os.path.dirname(os.path.abspath(output_path))
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+
+            # 验证临时输出路径可写入
+            try:
+                with open(temp_output_path, 'w') as f:
+                    pass
+                os.remove(temp_output_path)
+            except OSError as e:
+                return ProcessResult(False, error=f"无法写入输出路径 {output_dir}: {e}")
+
             ffmpeg = get_ffmpeg_path()
             cmd = [
                 ffmpeg, '-y',
@@ -409,7 +422,6 @@ class VideoProcessor:
                     '-c:v', 'prores_ks',
                     '-profile:v', '4444',
                     '-pix_fmt', 'yuva444p10le',
-                    '-avoid_negative_ts', 'make_zero',
                     temp_output_path
                 ])
                 logger.info("使用ProRes 4444编码（支持透明通道）")
@@ -419,7 +431,6 @@ class VideoProcessor:
                     '-c:v', 'libx264',
                     '-preset', 'medium',
                     '-crf', '23',
-                    '-avoid_negative_ts', 'make_zero',
                     '-movflags', '+faststart',
                     temp_output_path
                 ])

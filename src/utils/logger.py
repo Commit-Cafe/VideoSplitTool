@@ -36,12 +36,18 @@ def setup_logger(name: str = "VideoSplitTool") -> logging.Logger:
     # 日志文件路径（按日期命名）
     log_file = os.path.join(log_dir, f'video_tool_{datetime.now().strftime("%Y%m%d")}.log')
 
-    # 文件处理器（记录所有级别）
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
+    # 文件处理器（记录所有级别，每条日志立即落盘防丢失）
+    class FlushFileHandler(logging.FileHandler):
+        def emit(self, record):
+            super().emit(record)
+            self.flush()
+
     file_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
     )
+
+    file_handler = FlushFileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(file_formatter)
 
     # 控制台处理器（仅显示警告及以上）
