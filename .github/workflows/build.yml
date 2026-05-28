@@ -3,8 +3,8 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # 当推送 v 开头的标签时触发（如 v1.0.0）
-  workflow_dispatch:  # 允许手动触发
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -32,11 +32,8 @@ jobs:
 
       - name: Download FFmpeg
         run: |
-          # 下载 FFmpeg
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
           Expand-Archive -Path "ffmpeg.zip" -DestinationPath "."
-
-          # 找到 ffmpeg 目录并复制
           $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
           New-Item -ItemType Directory -Path "dist\ffmpeg\bin" -Force
           Copy-Item "$($ffmpegDir.FullName)\bin\ffmpeg.exe" "dist\ffmpeg\bin\"
@@ -45,40 +42,30 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.3 - Windows 版
+          视频分割拼接工具 - Windows 版
 
           使用说明：
-          1. 双击运行 VideoSplitTool.exe
-          2. FFmpeg 已内置在 ffmpeg/bin 目录下
+          1. 解压后双击运行 VideoSplitTool.exe
+          2. FFmpeg 已内置在 ffmpeg/bin 目录下，无需额外安装
 
-          V2.3 更新内容：
-          - 文件选择独立路径（三个按钮各自记住文件夹）
-          - MOV透明通道视频支持
-          - 默认输出尺寸/时长改为"跟随列表视频"
-
-          V2.2 更新内容：
-          - 曲线分界线功能（可编辑曲线形状）
-          - Catmull-Rom 平滑曲线插值
-          - 边缘抗锯齿和模糊处理
-          - 曲线同步到全部视频
-          - 输出尺寸配置（跟随模板/跟随列表/自定义）
-          - 拼接效果示意图（可拖拽调整）
-          - 视频缩放模式（拉伸/填充/适应）
-          - 代码架构优化（Mixin模式重构）
-
-          V2.0 功能：
+          功能特点：
           - 视频分割与拼接（左右/上下）
-          - 封面选帧实时预览
-          - 音频配置（模板/列表/混合/静音/自定义）
-          - 批量处理支持
+          - 视频叠加模式
+          - 曲线分界线
+          - 封面设置
+          - 音频配置
+          - 批量处理
+          - MOV透明通道支持
+
+          系统要求：Windows 10 及以上
 
           技术支持：https://github.com/${{ github.repository }}
           "@ | Out-File -FilePath "dist\README.txt" -Encoding utf8
 
       - name: Create distribution package
         run: |
-          $timestamp = Get-Date -Format "yyyyMMdd"
-          Compress-Archive -Path "dist\*" -DestinationPath "VideoSplitTool_Windows_$timestamp.zip"
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path "dist\*" -DestinationPath "VideoSplitTool_Windows_${tag}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -106,75 +93,62 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name VideoSplitTool main.py
 
-      - name: Download FFmpeg (static build)
+      - name: Detect architecture and download FFmpeg
         run: |
-          # 下载静态编译的 FFmpeg
           mkdir -p dist/ffmpeg/bin
-          cd dist/ffmpeg/bin
+          ARCH=$(uname -m)
 
-          # 下载 ffmpeg
-          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
-          unzip ffmpeg.zip
-          rm ffmpeg.zip
+          if [ "$ARCH" = "arm64" ]; then
+            echo "Apple Silicon (arm64) detected"
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          else
+            echo "Intel (x86_64) detected"
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          fi
 
-          # 下载 ffprobe
-          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
-          unzip ffprobe.zip
-          rm ffprobe.zip
+          unzip -o ffmpeg.zip -d dist/ffmpeg/bin
+          unzip -o ffprobe.zip -d dist/ffmpeg/bin
+          chmod +x dist/ffmpeg/bin/ffmpeg dist/ffmpeg/bin/ffprobe
+          rm -f ffmpeg.zip ffprobe.zip
 
-          # 设置执行权限
-          chmod +x ffmpeg ffprobe
-
-          # 验证
-          ls -la
-          ./ffmpeg -version
+          dist/ffmpeg/bin/ffmpeg -version | head -n1
 
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.3 - macOS 版
+          视频分割拼接工具 - macOS 版
 
           使用说明：
-          1. 双击运行 VideoSplitTool
-             如果提示"无法打开"，请在终端执行:
+          1. FFmpeg 已内置在 ffmpeg/bin 目录下，无需额外安装
+
+          2. 首次运行：
              chmod +x VideoSplitTool
              ./VideoSplitTool
 
-          2. 如果遇到安全提示：
+          3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
 
-          注意：FFmpeg 已内置在 ffmpeg/bin 目录下
-
-          V2.3 更新内容：
-          - 文件选择独立路径（三个按钮各自记住文件夹）
-          - MOV透明通道视频支持
-          - 默认输出尺寸/时长改为"跟随列表视频"
-          - macOS版本内置FFmpeg
-
-          V2.2 更新内容：
-          - 曲线分界线功能（可编辑曲线形状）
-          - Catmull-Rom 平滑曲线插值
-          - 边缘抗锯齿和模糊处理
-          - 曲线同步到全部视频
-          - 输出尺寸配置（跟随模板/跟随列表/自定义）
-          - 拼接效果示意图（可拖拽调整）
-          - 视频缩放模式（拉伸/填充/适应）
-          - 代码架构优化（Mixin模式重构）
-
-          V2.0 功能：
+          功能特点：
           - 视频分割与拼接（左右/上下）
-          - 封面选帧实时预览
-          - 音频配置（模板/列表/混合/静音/自定义）
-          - 批量处理支持
+          - 视频叠加模式
+          - 曲线分界线
+          - 封面设置
+          - 音频配置
+          - 批量处理
+          - MOV透明通道支持
+
+          系统要求：macOS 10.13 及以上
 
           技术支持：https://github.com/${{ github.repository }}
           EOF
 
       - name: Create distribution package
         run: |
-          timestamp=$(date +%Y%m%d)
+          tag="${{ github.ref_name }}"
           cd dist
-          zip -r "../VideoSplitTool_macOS_$timestamp.zip" VideoSplitTool ffmpeg README.txt
+          zip -r "../VideoSplitTool_macOS_${tag}.zip" VideoSplitTool ffmpeg README.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

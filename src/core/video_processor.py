@@ -356,9 +356,11 @@ class VideoProcessor:
                 cmd.extend(['-stream_loop', '-1', '-i', custom_audio_path])
 
             # 如果是自定义音频，添加音量滤镜
+            # 注意：当使用蒙版时，输入索引会发生变化
             if audio_source == "custom" and custom_audio_path:
                 custom_vol = custom_volume / 100.0
-                custom_audio_filter = f";[2:a]volume={custom_vol}[outa]"
+                audio_label = "[3:a]" if use_mask else "[2:a]"
+                custom_audio_filter = f";{audio_label}volume={custom_vol}[outa]"
                 filter_complex = filter_complex + custom_audio_filter
 
             cmd.extend([
@@ -635,14 +637,14 @@ class VideoProcessor:
             if target_has_audio:
                 audio_filter = f"[1:a]volume={list_vol}[outa]"
 
-        # 缩放滤镜
+        # 缩放滤镜 - 添加setsar=1确保像素尺寸为偶数
         bg_scale = _build_scale_filter(out_width, out_height, list_scale_mode)
         fg_scale = _build_scale_filter(out_width, out_height, template_scale_mode)
 
         # [0:v]=模板(前景), [1:v]=列表(背景)
         video_filter = (
-            f"[1:v]{bg_scale}[bg];"
-            f"[0:v]{fg_scale}[fg];"
+            f"[1:v]{bg_scale},setsar=1[bg];"
+            f"[0:v]{fg_scale},setsar=1[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2:format=yuv420[outv]"
         )
 
@@ -737,8 +739,8 @@ class VideoProcessor:
             if merge_mode == self.MERGE_A_C:
                 # 使用左半部分
                 video_filter = (
-                    f"[{bg_input}]{bg_scale},crop={part_width}:{out_height}:0:0[bg];"
-                    f"[{fg_input}]{fg_scale},crop={part_width}:{out_height}:0:0[fg];"
+                    f"[{bg_input}]{bg_scale},setsar=1,crop={part_width}:{out_height}:0:0[bg];"
+                    f"[{fg_input}]{fg_scale},setsar=1,crop={part_width}:{out_height}:0:0[fg];"
                     f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             elif merge_mode == self.MERGE_A_D:
@@ -767,8 +769,8 @@ class VideoProcessor:
             elif merge_mode == self.MERGE_B_D:
                 # 使用右半部分
                 video_filter = (
-                    f"[{bg_input}]{bg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[bg];"
-                    f"[{fg_input}]{fg_scale},crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
+                    f"[{bg_input}]{bg_scale},setsar=1,crop={out_width - part_width}:{out_height}:{part_width}:0[bg];"
+                    f"[{fg_input}]{fg_scale},setsar=1,crop={out_width - part_width}:{out_height}:{part_width}:0[fg];"
                     f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             else:
@@ -791,8 +793,8 @@ class VideoProcessor:
             if merge_mode == self.MERGE_A_C:
                 # 使用上半部分
                 video_filter = (
-                    f"[{bg_input}]{bg_scale},crop={out_width}:{part_height}:0:0[bg];"
-                    f"[{fg_input}]{fg_scale},crop={out_width}:{part_height}:0:0[fg];"
+                    f"[{bg_input}]{bg_scale},setsar=1,crop={out_width}:{part_height}:0:0[bg];"
+                    f"[{fg_input}]{fg_scale},setsar=1,crop={out_width}:{part_height}:0:0[fg];"
                     f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             elif merge_mode == self.MERGE_A_D:
@@ -818,8 +820,8 @@ class VideoProcessor:
                 )
             elif merge_mode == self.MERGE_B_D:
                 video_filter = (
-                    f"[{bg_input}]{bg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[bg];"
-                    f"[{fg_input}]{fg_scale},crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
+                    f"[{bg_input}]{bg_scale},setsar=1,crop={out_width}:{out_height - part_height}:0:{part_height}[bg];"
+                    f"[{fg_input}]{fg_scale},setsar=1,crop={out_width}:{out_height - part_height}:0:{part_height}[fg];"
                     f"[bg][fg]overlay=0:0:format=yuv420[outv]"
                 )
             else:
@@ -1023,24 +1025,21 @@ class VideoProcessor:
 
         # 如果有分界线宽度，需要在蒙版边缘绘制线条
         if divider_width > 0:
-            # 使用geq滤镜扩展蒙版边缘来创建分界线效果
-            # 先检测边缘，然后用颜色填充
+            # 使用边缘检测创建分界线效果
+            # 将分界线宽度转换为蒙版线条的阈值
             # 注意：split后原始标签被消费，需要分成3份用于不同用途
             video_filter = (
                 f"[{fg_input}]{fg_scale}[fg];"
                 f"[{bg_input}]{bg_scale}[bg];"
                 # 缩放蒙版并分成3份：用于边缘检测(2份)和alphamerge(1份)
                 f"[2:v]scale={out_width}:{out_height},format=gray,split=3[mask1][mask2][mask3];"
-                # 创建分界线：通过膨胀和腐蚀检测边缘
-                f"[mask1]erosion=threshold0=128:threshold1=128:threshold2=128:threshold3=128[eroded];"
+                # 创建分界线：通过膨胀检测边缘，然后增强边缘使其更明显
+                f"[mask1]erosion=threshold0={divider_width}:threshold1={divider_width}:threshold2={divider_width}:threshold3={divider_width}[eroded];"
                 f"[mask2][eroded]blend=all_expr='if(gt(A,B),255,0)'[edge];"
-                # 创建彩色分界线
-                f"color=c={divider_color}:s={out_width}x{out_height}[line_color];"
-                f"[line_color][edge]alphamerge[line];"
-                # 使用mask3进行视频合并
+                # 使用mask3进行视频合并，edge用于分界线显示
                 f"[fg][mask3]alphamerge[fg_alpha];"
                 f"[bg][fg_alpha]overlay=0:0[merged];"
-                f"[merged][line]overlay=0:0[outv]"
+                f"[merged][edge]overlay=0:0[outv]"
             )
         else:
             video_filter = (

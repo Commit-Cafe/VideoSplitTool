@@ -11,9 +11,11 @@ from ..utils.file_utils import get_base_path
 from ..utils.logger import logger
 
 
-# FFmpeg 路径缓存
 _ffmpeg_path: Optional[str] = None
 _ffprobe_path: Optional[str] = None
+
+_FFMPEG_EXE = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+_FFPROBE_EXE = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
 
 
 def get_ffmpeg_path() -> str:
@@ -24,21 +26,15 @@ def get_ffmpeg_path() -> str:
 
     base_path = get_base_path()
 
-    # 查找顺序：
-    # 1. 程序目录下的 ffmpeg/bin/ffmpeg.exe
-    # 2. 程序目录下的 ffmpeg-*/bin/ffmpeg.exe
-    # 3. 系统PATH中的ffmpeg
-
-    local_path = os.path.join(base_path, 'ffmpeg', 'bin', 'ffmpeg.exe')
+    local_path = os.path.join(base_path, 'ffmpeg', 'bin', _FFMPEG_EXE)
     if os.path.exists(local_path):
         _ffmpeg_path = local_path
         return _ffmpeg_path
 
-    # 检查 ffmpeg-*/bin 目录
     if os.path.exists(base_path):
         for item in os.listdir(base_path):
             if item.startswith('ffmpeg') and os.path.isdir(os.path.join(base_path, item)):
-                local_path = os.path.join(base_path, item, 'bin', 'ffmpeg.exe')
+                local_path = os.path.join(base_path, item, 'bin', _FFMPEG_EXE)
                 if os.path.exists(local_path):
                     _ffmpeg_path = local_path
                     return _ffmpeg_path
@@ -55,7 +51,7 @@ def get_ffprobe_path() -> str:
 
     base_path = get_base_path()
 
-    local_path = os.path.join(base_path, 'ffmpeg', 'bin', 'ffprobe.exe')
+    local_path = os.path.join(base_path, 'ffmpeg', 'bin', _FFPROBE_EXE)
     if os.path.exists(local_path):
         _ffprobe_path = local_path
         return _ffprobe_path
@@ -63,7 +59,7 @@ def get_ffprobe_path() -> str:
     if os.path.exists(base_path):
         for item in os.listdir(base_path):
             if item.startswith('ffmpeg') and os.path.isdir(os.path.join(base_path, item)):
-                local_path = os.path.join(base_path, item, 'bin', 'ffprobe.exe')
+                local_path = os.path.join(base_path, item, 'bin', _FFPROBE_EXE)
                 if os.path.exists(local_path):
                     _ffprobe_path = local_path
                     return _ffprobe_path

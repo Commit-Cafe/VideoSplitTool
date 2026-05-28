@@ -1,10 +1,7 @@
 name: Build (Manual Download)
 
-# 这个工作流用于手动触发，不会创建 Release
-# 构建完成后从 Artifacts 下载
-
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -29,11 +26,8 @@ jobs:
 
       - name: Download FFmpeg
         run: |
-          # 下载 FFmpeg
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
           Expand-Archive -Path "ffmpeg.zip" -DestinationPath "."
-
-          # 找到 ffmpeg 目录并复制
           $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
           New-Item -ItemType Directory -Path "dist\ffmpeg\bin" -Force
           Copy-Item "$($ffmpegDir.FullName)\bin\ffmpeg.exe" "dist\ffmpeg\bin\"
@@ -42,57 +36,22 @@ jobs:
       - name: Create README
         run: |
           @"
-          视频分割拼接工具 V2.5.6 - Windows 版
+          视频分割拼接工具 - Windows 版
 
           使用说明：
-          1. 双击运行 VideoSplitTool.exe
-          2. FFmpeg 已内置在 ffmpeg/bin 目录下
+          1. 解压后双击运行 VideoSplitTool.exe
+          2. FFmpeg 已内置在 ffmpeg/bin 目录下，无需额外安装
 
-          V2.5.6 更新内容：
-          - 修复：多实例并发导出到同一文件夹时偶尔少一个文件的问题（文件名唯一标识）
-          - 修复：导出视频偶尔开头几秒卡死不动的问题（时间戳修正 + faststart）
-          - 优化：FFmpeg 输出先写入临时文件再重命名，避免并发写入冲突
-
-          V2.5.5 更新内容：
-          - 修复：多实例文件路径同步问题（窗口A和窗口B的文件选择路径现在会实时同步）
-
-          V2.5.4 更新内容：
-          - 修复：视频叠加模式预览不显示的问题
-          - 优化：多实例间目录同步（热更新机制）
-
-          V2.5.3 更新内容：
-          - 新增：支持多开（每个实例配置独立，互不干扰）
-          - 新增：制作完成声音提醒 + 任务栏窗口闪烁提示
-          - 优化：后台处理完成时即使窗口最小化也能收到明显提醒
-
-          V2.5.2 更新内容：
-          - 新增：目录记忆功能（模板视频、视频列表、输出目录选择时记住上次打开的目录）
-          - 新增：视频列表显示已选视频数量
-
-          V2.5.1 更新内容：
-          - 修复：默认分割方式改为"上下分割"
-          - 修复：视频叠加模式下分割拼接选项显示bug
-
-          V2.5 更新内容：
-          - 新增视频叠加模式（两个视频全帧叠加播放）
-          - 修复 FFmpeg 8.0 兼容性问题
-          - 默认拼接方式改为 B+C、列表在左/上
-
-          V2.2 更新内容：
-          - 曲线分界线功能（可编辑曲线形状）
-          - Catmull-Rom 平滑曲线插值
-          - 边缘抗锯齿和模糊处理
-          - 曲线同步到全部视频
-          - 输出尺寸配置（跟随模板/跟随列表/自定义）
-          - 拼接效果示意图（可拖拽调整）
-          - 视频缩放模式（拉伸/填充/适应）
-          - 代码架构优化（Mixin模式重构）
-
-          V2.0 功能：
+          功能特点：
           - 视频分割与拼接（左右/上下）
-          - 封面选帧实时预览
-          - 音频配置（模板/列表/混合/静音/自定义）
-          - 批量处理支持
+          - 视频叠加模式
+          - 曲线分界线
+          - 封面设置
+          - 音频配置
+          - 批量处理
+          - MOV透明通道支持
+
+          系统要求：Windows 10 及以上
 
           技术支持：https://github.com/${{ github.repository }}
           "@ | Out-File -FilePath "dist\README.txt" -Encoding utf8
@@ -131,81 +90,51 @@ jobs:
 
       - name: Download FFmpeg for macOS
         run: |
-          # 下载静态编译的 FFmpeg for macOS (universal binary)
-          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
-          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
-
-          # 解压并创建目录
-          unzip ffmpeg.zip -d ffmpeg_dir
-          unzip ffprobe.zip -d ffprobe_dir
-
           mkdir -p dist/ffmpeg/bin
-          cp ffmpeg_dir/ffmpeg dist/ffmpeg/bin/
-          cp ffprobe_dir/ffprobe dist/ffmpeg/bin/
+          ARCH=$(uname -m)
+
+          if [ "$ARCH" = "arm64" ]; then
+            echo "Apple Silicon (arm64) detected"
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          else
+            echo "Intel (x86_64) detected"
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o ffmpeg.zip
+            curl -L "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          fi
+
+          unzip -o ffmpeg.zip -d dist/ffmpeg/bin
+          unzip -o ffprobe.zip -d dist/ffmpeg/bin
           chmod +x dist/ffmpeg/bin/ffmpeg dist/ffmpeg/bin/ffprobe
+          rm -f ffmpeg.zip ffprobe.zip
+
+          dist/ffmpeg/bin/ffmpeg -version | head -n1
 
       - name: Create README
         run: |
           cat > dist/README.txt << 'EOF'
-          视频分割拼接工具 V2.5.6 - macOS 版
+          视频分割拼接工具 - macOS 版
 
           使用说明：
-          1. FFmpeg 已内置在 ffmpeg/bin 目录下
+          1. FFmpeg 已内置在 ffmpeg/bin 目录下，无需额外安装
 
-          2. 双击运行 VideoSplitTool
-             如果提示"无法打开"，请在终端执行:
+          2. 首次运行：
              chmod +x VideoSplitTool
              ./VideoSplitTool
 
           3. 如果遇到安全提示：
              系统偏好设置 -> 安全性与隐私 -> 通用 -> 点击"仍要打开"
 
-          V2.5.6 更新内容：
-          - 修复：多实例并发导出到同一文件夹时偶尔少一个文件的问题（文件名唯一标识）
-          - 修复：导出视频偶尔开头几秒卡死不动的问题（时间戳修正 + faststart）
-          - 优化：FFmpeg 输出先写入临时文件再重命名，避免并发写入冲突
-
-          V2.5.5 更新内容：
-          - 修复：多实例文件路径同步问题（窗口A和窗口B的文件选择路径现在会实时同步）
-
-          V2.5.4 更新内容：
-          - 修复：视频叠加模式预览不显示的问题
-          - 优化：多实例间目录同步（热更新机制）
-
-          V2.5.3 更新内容：
-          - 新增：支持多开（每个实例配置独立，互不干扰）
-          - 新增：制作完成声音提醒 + Dock 图标弹跳提示
-          - 优化：后台处理完成时即使窗口最小化也能收到明显提醒
-          
-          V2.5.2 更新内容：
-          - 新增：目录记忆功能（模板视频、视频列表、输出目录选择时记住上次打开的目录）
-          - 新增：视频列表显示已选视频数量
-          
-          V2.5.1 更新内容：
-          - 修复：默认分割方式改为"上下分割"
-          - 修复：视频叠加模式下分割拼接选项显示bug
-          
-          V2.5 更新内容：
-          - 新增视频叠加模式（两个视频全帧叠加播放）
-          - 修复 FFmpeg 8.0 兼容性问题
-          - 默认拼接方式改为 B+C、列表在左/上
-          - macOS 版本内置 FFmpeg
-
-          V2.2 更新内容：
-          - 曲线分界线功能（可编辑曲线形状）
-          - Catmull-Rom 平滑曲线插值
-          - 边缘抗锯齿和模糊处理
-          - 曲线同步到全部视频
-          - 输出尺寸配置（跟随模板/跟随列表/自定义）
-          - 拼接效果示意图（可拖拽调整）
-          - 视频缩放模式（拉伸/填充/适应）
-          - 代码架构优化（Mixin模式重构）
-
-          V2.0 功能：
+          功能特点：
           - 视频分割与拼接（左右/上下）
-          - 封面选帧实时预览
-          - 音频配置（模板/列表/混合/静音/自定义）
-          - 批量处理支持
+          - 视频叠加模式
+          - 曲线分界线
+          - 封面设置
+          - 音频配置
+          - 批量处理
+          - MOV透明通道支持
+
+          系统要求：macOS 10.13 及以上
 
           技术支持：https://github.com/${{ github.repository }}
           EOF
