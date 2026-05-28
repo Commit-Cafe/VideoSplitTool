@@ -99,7 +99,7 @@ class VideoProcessor:
         """
         try:
             logger.info(f"执行FFmpeg命令: {description}")
-            logger.debug(f"FFmpeg命令: {' '.join(cmd)}")
+            logger.info(f"FFmpeg完整命令: {' '.join(cmd)}")
 
             result = subprocess.run(
                 cmd,
@@ -121,10 +121,12 @@ class VideoProcessor:
                 )
                 error_msg = format_error_message(error_desc, suggestions)
 
-                # 附加FFmpeg原始错误最后几行，方便定位具体原因
-                key_error = ErrorDiagnostics._extract_key_error(result.stderr)
-                if key_error:
-                    error_msg += f"\n\nFFmpeg原始错误:\n{key_error}"
+                # 附加FFmpeg完整错误输出，方便定位具体原因
+                if result.stderr.strip():
+                    stderr_short = result.stderr.strip()
+                    if len(stderr_short) > 800:
+                        stderr_short = "..." + stderr_short[-800:]
+                    error_msg += f"\n\nFFmpeg完整错误:\n{stderr_short}"
 
                 return False, error_msg
 
@@ -368,7 +370,6 @@ class VideoProcessor:
             ffmpeg = get_ffmpeg_path()
             cmd = [
                 ffmpeg, '-y',
-                '-fflags', '+genpts',
                 '-stream_loop', '-1', '-i', template_video,
                 '-stream_loop', '-1', '-i', target_video,
             ]
@@ -431,7 +432,6 @@ class VideoProcessor:
                     '-c:v', 'libx264',
                     '-preset', 'medium',
                     '-crf', '23',
-                    '-movflags', '+faststart',
                     temp_output_path
                 ])
 
@@ -543,7 +543,6 @@ class VideoProcessor:
                     '-b:a', '128k',
                     '-preset', 'medium',
                     '-crf', '23',
-                    '-movflags', '+faststart',
                     final_output
                 ]
             else:
@@ -559,7 +558,6 @@ class VideoProcessor:
                     '-c:v', 'libx264',
                     '-preset', 'medium',
                     '-crf', '23',
-                    '-movflags', '+faststart',
                     final_output
                 ]
 
