@@ -1,0 +1,172 @@
+{
+  "D:\\trae_Dproject\\VideoSplitTool\\.graphify_detect.json": {
+    "mtime": 1780454606.25014,
+    "ast_hash": "07616bb7746411fbaa51199c942cc774",
+    "semantic_hash": "07616bb7746411fbaa51199c942cc774"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\main.py": {
+    "mtime": 1779959756.881106,
+    "ast_hash": "0bd8fae46dace2304993c022d3bafc86",
+    "semantic_hash": "0bd8fae46dace2304993c022d3bafc86"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\.claude\\settings.local.json": {
+    "mtime": 1770376483.0136654,
+    "ast_hash": "cf5f5ee7f9a935145124dab9fab3f789",
+    "semantic_hash": "cf5f5ee7f9a935145124dab9fab3f789"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\app.py": {
+    "mtime": 1770376483.0206168,
+    "ast_hash": "c8db048d180166a42e0cbccf05db4bbe",
+    "semantic_hash": "c8db048d180166a42e0cbccf05db4bbe"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\__init__.py": {
+    "mtime": 1779959732.8701096,
+    "ast_hash": "7f7d94e1872536fcf5d8c8b9a70b8c62",
+    "semantic_hash": "7f7d94e1872536fcf5d8c8b9a70b8c62"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\core\\error_handler.py": {
+    "mtime": 1779956664.3171031,
+    "ast_hash": "fc3f763e672403d7d186246c8595f13a",
+    "semantic_hash": "fc3f763e672403d7d186246c8595f13a"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\core\\ffmpeg_utils.py": {
+    "mtime": 1779850046.007189,
+    "ast_hash": "860b558b9001f39f56fd3cad3993210f",
+    "semantic_hash": "860b558b9001f39f56fd3cad3993210f"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\core\\video_processor.py": {
+    "mtime": 1779958301.234066,
+    "ast_hash": "23c5c7809064866294e8870eb20e6633",
+    "semantic_hash": "23c5c7809064866294e8870eb20e6633"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\core\\__init__.py": {
+    "mtime": 1770376483.02359,
+    "ast_hash": "1ea85aeddbc5afb9b88a7350267ea683",
+    "semantic_hash": "1ea85aeddbc5afb9b88a7350267ea683"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\models\\config.py": {
+    "mtime": 1775213515.7620127,
+    "ast_hash": "3f50ebd9412ea42faed08e16d4723732",
+    "semantic_hash": "3f50ebd9412ea42faed08e16d4723732"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\models\\video_item.py": {
+    "mtime": 1770376483.028792,
+    "ast_hash": "1b51a424a1095f6cfdbe93ae2abf4c98",
+    "semantic_hash": "1b51a424a1095f6cfdbe93ae2abf4c98"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\models\\__init__.py": {
+    "mtime": 1770376483.027079,
+    "ast_hash": "a1b07e20be4fa001385d2157b228d5fc",
+    "semantic_hash": "a1b07e20be4fa001385d2157b228d5fc"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\compat.py": {
+    "mtime": 1770376483.030499,
+    "ast_hash": "2a2d348bb428f1de30ad71de9e391b6c",
+    "semantic_hash": "2a2d348bb428f1de30ad71de9e391b6c"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\dialogs.py": {
+    "mtime": 1770376483.030499,
+    "ast_hash": "cc0ab9ade1176f5e083cf817acb898b3",
+    "semantic_hash": "cc0ab9ade1176f5e083cf817acb898b3"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\main_window.py": {
+    "mtime": 1779959745.1951818,
+    "ast_hash": "f68f6f5dff6cf2264dd6be80d80d067f",
+    "semantic_hash": "f68f6f5dff6cf2264dd6be80d80d067f"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\widgets.py": {
+    "mtime": 1770376483.0411322,
+    "ast_hash": "c25e69405997c55abdd1965823a2ffaa",
+    "semantic_hash": "c25e69405997c55abdd1965823a2ffaa"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\__init__.py": {
+    "mtime": 1770376483.030499,
+    "ast_hash": "04fc1a4989cc4fe2f69a3b04d2d872f6",
+    "semantic_hash": "04fc1a4989cc4fe2f69a3b04d2d872f6"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\audio_mixin.py": {
+    "mtime": 1776330755.3978288,
+    "ast_hash": "de0dcb39764bf79091bd0af83af9e838",
+    "semantic_hash": "de0dcb39764bf79091bd0af83af9e838"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\cover_mixin.py": {
+    "mtime": 1776330823.0406413,
+    "ast_hash": "376f9dee19287547cb36fb9881687307",
+    "semantic_hash": "376f9dee19287547cb36fb9881687307"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\diagram_mixin.py": {
+    "mtime": 1770376483.0360875,
+    "ast_hash": "8d42cf03a0f3da81d52e72ebae7e8bba",
+    "semantic_hash": "8d42cf03a0f3da81d52e72ebae7e8bba"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\divider_mixin.py": {
+    "mtime": 1770376483.0378823,
+    "ast_hash": "d740f8c3e94917e9583ed2518c6669ee",
+    "semantic_hash": "d740f8c3e94917e9583ed2518c6669ee"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\preview_mixin.py": {
+    "mtime": 1776331627.8905902,
+    "ast_hash": "c4e5e2aaeba2a7a222dbb46c13f97b24",
+    "semantic_hash": "c4e5e2aaeba2a7a222dbb46c13f97b24"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\processing_mixin.py": {
+    "mtime": 1775530354.8283563,
+    "ast_hash": "01767a7ef55472317a6e8bb7ce126866",
+    "semantic_hash": "01767a7ef55472317a6e8bb7ce126866"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\ui\\mixins\\__init__.py": {
+    "mtime": 1770376483.0342462,
+    "ast_hash": "7178f666e73227167467b1e942de9fee",
+    "semantic_hash": "7178f666e73227167467b1e942de9fee"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\utils\\file_utils.py": {
+    "mtime": 1770376483.0427966,
+    "ast_hash": "97002387c7353171b40db3b685abc62c",
+    "semantic_hash": "97002387c7353171b40db3b685abc62c"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\utils\\format_utils.py": {
+    "mtime": 1770376483.0444872,
+    "ast_hash": "8c47eec0c4d801e694497c47e8c22bd5",
+    "semantic_hash": "8c47eec0c4d801e694497c47e8c22bd5"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\utils\\logger.py": {
+    "mtime": 1779957723.7232447,
+    "ast_hash": "cbab66e05397a2ffc92c51c99c005cc2",
+    "semantic_hash": "cbab66e05397a2ffc92c51c99c005cc2"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\utils\\temp_manager.py": {
+    "mtime": 1770376483.0444872,
+    "ast_hash": "f0268fa34ca6424568fedca2f737958c",
+    "semantic_hash": "f0268fa34ca6424568fedca2f737958c"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\src\\utils\\__init__.py": {
+    "mtime": 1770376483.0411322,
+    "ast_hash": "bb1ad93b6fe7644ef881a560b671d1e2",
+    "semantic_hash": "bb1ad93b6fe7644ef881a560b671d1e2"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\claude-code review1.md": {
+    "mtime": 1779956543.5940049,
+    "ast_hash": "d1e3a50d54eedf2deefd3ad114db9139",
+    "semantic_hash": "d1e3a50d54eedf2deefd3ad114db9139"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\README.md": {
+    "mtime": 1779959720.7920692,
+    "ast_hash": "69040ea70a7446f1ba0e4b2318558309",
+    "semantic_hash": "69040ea70a7446f1ba0e4b2318558309"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\requirements.txt": {
+    "mtime": 1770376483.0189154,
+    "ast_hash": "277b74bc4ea98bd9852b8b8753b1dbe9",
+    "semantic_hash": "277b74bc4ea98bd9852b8b8753b1dbe9"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\.github\\workflows\\build-manual.yml": {
+    "mtime": 1779850139.3710587,
+    "ast_hash": "8551a58c52273dc4bab80bef8bc8d119",
+    "semantic_hash": "8551a58c52273dc4bab80bef8bc8d119"
+  },
+  "D:\\trae_Dproject\\VideoSplitTool\\.github\\workflows\\build.yml": {
+    "mtime": 1779850096.926071,
+    "ast_hash": "aac7f77740ced84b1c0586564c05d4b3",
+    "semantic_hash": "aac7f77740ced84b1c0586564c05d4b3"
+  }
+}
