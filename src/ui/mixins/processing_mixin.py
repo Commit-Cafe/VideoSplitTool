@@ -44,49 +44,70 @@ class ProcessingMixin:
     - _generate_divider_mask(): 生成分界线蒙版
     """
 
+    def _validate_processing_inputs(self):
+        """
+        验证处理前的所有输入
+
+        Returns:
+            (ok, title, message):
+              - ok: True 表示可以开始处理
+              - title: 弹窗标题（"警告"用 showwarning，其他用 showerror）
+              - message: 弹窗内容
+        """
+        is_image_logo = self.process_mode.get() == "image_logo"
+
+        template_path = self.template_video.get()
+        if not template_path:
+            return False, "警告", "请选择模板视频"
+
+        is_valid, error_msg = InputValidator.validate_video_file(template_path)
+        if not is_valid:
+            return False, "模板视频错误", f"模板视频无效:\n{error_msg}"
+
+        # image_logo 模式：不需要列表视频（logo 叠加在模板上）
+        if not is_image_logo:
+            if not self.video_items:
+                return False, "警告", "请添加要处理的视频"
+            for i, video_item in enumerate(self.video_items, 1):
+                is_valid, error_msg = InputValidator.validate_video_file(video_item.path)
+                if not is_valid:
+                    return False, "列表视频错误", f"第{i}个视频 '{video_item.name}' 无效:\n{error_msg}"
+        else:
+            if not self.logo_enabled.get():
+                return False, "警告", "图片 Logo 模式需要启用 Logo"
+            logo_p = self.logo_path.get()
+            if not logo_p or not os.path.isfile(logo_p):
+                return False, "警告", "请选择有效的 Logo 图片文件"
+
+        output_path = self.output_dir.get()
+        if not output_path:
+            return False, "警告", "请选择输出目录"
+
+        is_valid, error_msg = InputValidator.validate_output_directory(output_path)
+        if not is_valid:
+            return False, "输出目录错误", f"输出目录无效:\n{error_msg}"
+
+        combinations = self._get_merge_combinations()
+        if not combinations:
+            return False, "警告", "请至少勾选模板和列表各一个部分"
+
+        return True, "", ""
+
     def _start_processing(self):
         """开始处理"""
         if self.is_processing:
             messagebox.showinfo("提示", "正在处理中，请等待完成")
             return
 
-        template_path = self.template_video.get()
-        if not template_path:
-            messagebox.showwarning("警告", "请选择模板视频")
-            return
-
-        is_valid, error_msg = InputValidator.validate_video_file(template_path)
-        if not is_valid:
-            messagebox.showerror("模板视频错误", f"模板视频无效:\n{error_msg}")
-            return
-
-        if not self.video_items:
-            messagebox.showwarning("警告", "请添加要处理的视频")
-            return
-
-        for i, video_item in enumerate(self.video_items, 1):
-            is_valid, error_msg = InputValidator.validate_video_file(video_item.path)
-            if not is_valid:
-                messagebox.showerror(
-                    "列表视频错误",
-                    f"第{i}个视频 '{video_item.name}' 无效:\n{error_msg}"
-                )
-                return
-
-        output_path = self.output_dir.get()
-        if not output_path:
-            messagebox.showwarning("警告", "请选择输出目录")
-            return
-
-        is_valid, error_msg = InputValidator.validate_output_directory(output_path)
-        if not is_valid:
-            messagebox.showerror("输出目录错误", f"输出目录无效:\n{error_msg}")
+        ok, title, msg = self._validate_processing_inputs()
+        if not ok:
+            if title in ("警告",):
+                messagebox.showwarning(title, msg)
+            else:
+                messagebox.showerror(title, msg)
             return
 
         combinations = self._get_merge_combinations()
-        if not combinations:
-            messagebox.showwarning("警告", "请至少勾选模板和列表各一个部分")
-            return
 
         # 将全局封面设置应用到各视频项
         self._apply_global_cover_settings()
@@ -100,16 +121,41 @@ class ProcessingMixin:
         thread = threading.Thread(target=self._process_videos, args=(combinations,))
         thread.daemon = False
         thread.start()
-        logger.info(f"启动处理线程，共 {len(self.video_items)} 个视频，{len(combinations)} 种组合")
+        is_image_logo = self.process_mode.get() == "image_logo"
+        video_count = 1 if is_image_logo else len(self.video_items)
+        logger.info(f"启动处理线程，共 {video_count} 个视频，{len(combinations)} 种组合")
 
     def _process_videos(self, merge_combinations):
         """处理视频（后台线程）"""
-        total_tasks = len(self.video_items) * len(merge_combinations)
+        is_image_logo = self.process_mode.get() == "image_logo"
+
+        # 构建任务列表：
+        # - image_logo 模式：以模板视频作为唯一"目标"，循环 1 次
+        # - 其他模式：遍历 self.video_items 中的每个列表视频
+        if is_image_logo:
+            from types import SimpleNamespace
+            template_path = self.template_video.get()
+            tasks = [SimpleNamespace(
+                path=template_path,
+                name=os.path.basename(template_path),
+                split_ratio=self.split_ratio.get(),
+                scale_percent=None,
+                cover_type=self.global_cover_type.get(),
+                cover_frame_time=self.global_cover_frame_time.get(),
+                cover_image_path=None,
+                cover_duration=0.0,
+                cover_frame_source='list',
+                curve_points=None,
+            )]
+        else:
+            tasks = self.video_items
+
+        total_tasks = len(tasks) * len(merge_combinations)
         success_count = 0
         results = []
         task_index = 0
 
-        for i, video_item in enumerate(self.video_items):
+        for i, video_item in enumerate(tasks):
             for merge_mode in merge_combinations:
                 # 检查是否被停止
                 if self.processing_stopped:
@@ -219,11 +265,24 @@ class ProcessingMixin:
                     divider_mask_path=divider_mask,
                     divider_color=self.divider_color.get(),
                     divider_width=self.divider_width.get(),
-                    process_mode=self.process_mode.get()
+                    process_mode=self.process_mode.get(),
+                    # ========== 图片 logo 参数 ==========
+                    logo_enabled=self.logo_enabled.get() and self.process_mode.get() == "image_logo",
+                    logo_path=self.logo_path.get() if self.logo_enabled.get() else None,
+                    logo_size_percent=self.logo_size_percent.get(),
+                    logo_x_percent=self.logo_x_percent.get(),
+                    logo_y_percent=self.logo_y_percent.get(),
+                    logo_angle=self.logo_angle.get(),
+                    logo_opacity=float(self.logo_opacity.get()) / 100.0
                 )
 
                 result_name = f"{video_item.name} ({merge_mode.upper()})"
-                results.append({'name': result_name, 'success': result.success, 'error': result.error})
+                results.append({
+                    'name': result_name,
+                    'success': result.success,
+                    'error': result.error,
+                    'output_path': output_path,  # 完整输出路径（用于在成功窗口显示）
+                })
                 if result.success:
                     success_count += 1
 
@@ -287,7 +346,7 @@ class ProcessingMixin:
         """显示处理结果"""
         result_window = tk.Toplevel(self.root)
         result_window.title("处理结果")
-        result_window.geometry("500x400")
+        result_window.geometry("640x460")
         result_window.transient(self.root)
 
         title_text = f"处理完成: 成功 {success_count}/{total}"
@@ -309,11 +368,16 @@ class ProcessingMixin:
         text.tag_configure('success', foreground='green')
         text.tag_configure('error', foreground='red')
         text.tag_configure('filename', foreground='blue', font=('Consolas', 10, 'bold'))
+        text.tag_configure('filepath', foreground='#0066cc')
 
         for i, result in enumerate(results):
             text.insert(tk.END, f"{i + 1}. {result['name']}\n", 'filename')
             if result['success']:
-                text.insert(tk.END, "   状态: 成功\n\n", 'success')
+                text.insert(tk.END, "   状态: 成功\n", 'success')
+                output_path = result.get('output_path', '')
+                if output_path:
+                    text.insert(tk.END, f"   输出: {output_path}\n", 'filepath')
+                text.insert(tk.END, "\n")
             else:
                 text.insert(tk.END, f"   状态: 失败\n   原因: {result['error']}\n\n", 'error')
 
@@ -322,15 +386,87 @@ class ProcessingMixin:
         btn_frame = ttk.Frame(result_window)
         btn_frame.pack(pady=10)
         ttk.Button(btn_frame, text="打开输出目录", command=self._open_output_dir).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="复制首个成功文件路径", command=lambda: self._copy_first_success_path(results)).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="关闭", command=result_window.destroy).pack(side=tk.LEFT, padx=5)
 
-        self._open_output_dir()
+        # 如果有成功的任务，自动打开输出目录
+        if any(r['success'] for r in results):
+            self._open_output_dir()
+
+    def _copy_first_success_path(self, results: list):
+        """复制首个成功任务的输出路径到剪贴板"""
+        from tkinter import messagebox
+        for r in results:
+            if r['success'] and r.get('output_path'):
+                path = r['output_path']
+                try:
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(path)
+                    messagebox.showinfo("已复制", f"路径已复制到剪贴板：\n{path}")
+                except Exception as e:
+                    messagebox.showerror("复制失败", str(e))
+                return
+        messagebox.showinfo("提示", "没有成功的任务可复制")
+
+    def _test_output_dir(self):
+        """测试输出目录是否可写入（UI 工具按钮）"""
+        from tkinter import messagebox
+
+        output_dir = self.output_dir.get()
+        if not output_dir:
+            messagebox.showwarning("提示", "请先选择输出目录")
+            return
+
+        # 调用 VideoProcessor 的详细诊断方法
+        ok, msg = self.processor._check_output_writability(output_dir)
+        if ok:
+            messagebox.showinfo(
+                "输出目录可写",
+                f"目录 {output_dir} 可正常写入。\n\n可以开始处理。"
+            )
+        else:
+            # 提供两种选择：手动修复 / 用临时目录
+            full_msg = (
+                f"{msg}\n\n"
+                f"建议：\n"
+                f"  • 点击旁边的『用临时目录』按钮，一键切换到系统临时目录\n"
+                f"  • 或手动修改输出目录（右键该目录 → 属性 → 安全 → 赋予写权限）"
+            )
+            messagebox.showerror("输出目录不可写", full_msg)
+
+    def _use_temp_output_dir(self):
+        """将输出目录设置为系统临时目录（被锁目录的临时解决方案）"""
+        from tkinter import messagebox
+        import tempfile
+
+        temp_dir = tempfile.gettempdir()
+        self.output_dir.set(temp_dir)
+        messagebox.showinfo(
+            "已切换到临时目录",
+            f"输出目录已设置为系统临时目录：\n{temp_dir}\n\n"
+            f"提示：处理完成后请手动将文件复制到您想要的目录。"
+        )
 
     def _open_output_dir(self):
-        """打开输出目录"""
+        """在 Windows 资源管理器中打开输出目录（让用户看到生成的所有文件）"""
+        from tkinter import messagebox
+        import subprocess
+        import os
+
         output_dir = self.output_dir.get()
-        if output_dir and os.path.exists(output_dir):
-            if os.name == 'nt':
-                os.startfile(output_dir)
-            else:
-                subprocess.run(['xdg-open', output_dir])
+        if not output_dir:
+            messagebox.showwarning("提示", "请先选择输出目录")
+            return
+
+        if not os.path.isdir(output_dir):
+            messagebox.showwarning(
+                "目录不存在",
+                f"输出目录 {output_dir} 不存在。\n请先点击「测试」检查，或用「用临时目录」切换。"
+            )
+            return
+
+        try:
+            # Windows 上用 explorer 打开
+            subprocess.Popen(f'explorer "{output_dir}"')
+        except Exception as e:
+            messagebox.showerror("打开失败", f"无法打开目录: {e}")

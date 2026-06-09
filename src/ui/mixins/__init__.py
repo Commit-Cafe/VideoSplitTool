@@ -8,6 +8,7 @@ UI Mixins 模块
 - DiagramMixin: 效果示意图（可拖拽调整区块）
 - CoverMixin: 封面设置（类型选择、帧时间、图片等）
 - AudioMixin: 音频设置（音源选择、音量调节、试听等）
+- LogoMixin: 图片 logo 叠加（文件选择、位置/大小/角度/不透明度）
 - ProcessingMixin: 视频处理（批量处理、进度跟踪、结果显示）
 """
 
@@ -16,6 +17,7 @@ from .preview_mixin import PreviewMixin
 from .diagram_mixin import DiagramMixin
 from .cover_mixin import CoverMixin
 from .audio_mixin import AudioMixin
+from .logo_mixin import LogoMixin
 from .processing_mixin import ProcessingMixin
 
 __all__ = [
@@ -24,5 +26,6 @@ __all__ = [
     'DiagramMixin',
     'CoverMixin',
     'AudioMixin',
+    'LogoMixin',
     'ProcessingMixin',
 ]

@@ -60,8 +60,100 @@ def _build_scale_filter(width: int, height: int, mode: str = "stretch") -> str:
         return f"scale={width}:{height}:force_original_aspect_ratio=disable"
 
 
+# Logo 位置常量（已废弃：位置改为 X/Y 中心点百分比）
+
+
+def _logo_overlay_xy_from_center(
+    x_percent: int,
+    y_percent: int
+) -> str:
+    """
+    根据 logo 中心点百分比计算 FFmpeg overlay 滤镜的 x:y 表达式（logo 左上角）
+    语义：(X%, Y%) 是 logo 中心在视频中的位置
+        - (0%, 0%)   = 视频左上角（logo 中心在角点，logo 一半溢出）
+        - (50%, 50%) = 视频中心（logo 居中）
+        - (100%, 100%) = 视频右下角
+    转换：logo 左上角 = (W*X/100 - w/2, H*Y/100 - h/2)
+    """
+    x = max(0, min(100, int(x_percent)))
+    y = max(0, min(100, int(y_percent)))
+    return f"W*{x}/100-w/2:H*{y}/100-h/2"
+
+
+def _logo_size_filter(logo_size_percent: int) -> str:
+    """
+    根据百分比构造 logo 缩放滤镜
+    按输出视频宽度百分比缩放，高度按比例
+    """
+    return f"scale=iw*{int(logo_size_percent)}/100:-1"
+
+
 class VideoProcessor:
     """视频处理器"""
+
+    @staticmethod
+    def _check_output_writability(output_dir: str) -> tuple:
+        """
+        检查输出目录是否可写入，给出可操作的诊断信息
+
+        Args:
+            output_dir: 待检查的目录绝对路径
+
+        Returns:
+            (ok: bool, message: str):
+              - ok=True: 目录存在且可写，message 为空
+              - ok=False: 目录有问题，message 为详细诊断
+        """
+        import uuid as _uuid
+
+        if not output_dir:
+            return False, "输出目录路径为空"
+
+        # 规范化路径（去除尾随空格、点等不可见字符）
+        normalized = os.path.normpath(os.path.abspath(output_dir))
+        if normalized != output_dir:
+            return False, (
+                f"路径包含不规范字符（不可见字符或尾随空格/点）。\n"
+                f"  原始: {repr(output_dir)}\n"
+                f"  规范化: {repr(normalized)}\n"
+                f"  建议: 重新选择输出目录，避免复制时带入不可见字符"
+            )
+
+        if not os.path.exists(normalized):
+            return False, f"输出目录不存在: {normalized}\n请确认 D 盘已连接且目录路径正确"
+
+        if not os.path.isdir(normalized):
+            return False, f"输出路径不是目录: {normalized}"
+
+        # 检查写权限（os.access 仅检查权限位，不实际写入）
+        if not os.access(normalized, os.W_OK):
+            return False, (
+                f"输出目录无写权限: {normalized}\n"
+                f"  可能原因：\n"
+                f"    1. 目录是只读的\n"
+                f"    2. 当前用户没有该目录的写权限（右键 → 属性 → 安全）\n"
+                f"    3. 目录被 OneDrive/Google Drive/Dropbox 等云盘锁定"
+            )
+
+        # 实际写一个临时文件验证
+        try:
+            test_path = os.path.join(normalized, f".write_test_{_uuid.uuid4().hex[:8]}.tmp")
+            with open(test_path, 'w') as f:
+                f.write('test')
+            os.remove(test_path)
+            return True, ""
+        except PermissionError as e:
+            return False, (
+                f"输出目录被锁定（实际写入失败）: {normalized}\n"
+                f"  错误: {e}\n"
+                f"  可能原因：\n"
+                f"    1. 该目录被 OneDrive/Google Drive/Dropbox 等云盘同步中（同步过程会临时锁定）\n"
+                f"    2. 该目录被其他程序占用（如 Telegram 客户端、杀毒软件）\n"
+                f"    3. 当前用户没有该目录的写权限\n"
+                f"  建议：换一个本地非云同步目录（如 D:\\Videos\\）"
+            )
+        except OSError as e:
+            return False, f"写入测试失败: {normalized}\n  错误: {e}"
 
     # 拼接方式常量
     MERGE_A_C = "a+c"  # 模板左/上 + 列表左/上
@@ -87,6 +179,65 @@ class VideoProcessor:
         """报告进度"""
         if self._progress_callback:
             self._progress_callback(progress, message)
+
+    def _validate_output_file(self, output_path: str) -> tuple:
+        """
+        验证输出 MP4 文件是否有效（防止 FFmpeg 写出 0 字节或损坏的文件）
+
+        检查项：
+          1. 文件存在
+          2. 文件大小 > 1KB（FFmpeg 最小的 MP4 至少几 KB）
+          3. 文件包含 MP4 'ftyp' 头（offset 4-7）
+          4. 文件前 32 字节不全为 0（防止写入 0 字节失败）
+
+        Returns:
+            (ok: bool, message: str):
+              - ok=True: 文件有效
+              - ok=False: 文件有问题，message 为详细诊断
+        """
+        if not os.path.exists(output_path):
+            return False, f"输出文件不存在: {output_path}"
+
+        try:
+            file_size = os.path.getsize(output_path)
+        except OSError as e:
+            return False, f"无法读取输出文件大小: {e}"
+
+        if file_size < 1024:
+            return False, (
+                f"输出文件太小 ({file_size} bytes)，可能已损坏。\n"
+                f"  文件路径: {output_path}\n"
+                f"  可能原因：\n"
+                f"    1. FFmpeg 处理时崩溃（查看下方 FFmpeg 错误日志）\n"
+                f"    2. 模板视频或 logo 文件异常\n"
+                f"    3. 输出目录写权限问题（虽然已通过前期检查）"
+            )
+
+        # 检查 MP4 ftyp 头
+        try:
+            with open(output_path, 'rb') as f:
+                header = f.read(32)
+            if len(header) < 8 or header[4:8] != b'ftyp':
+                return False, (
+                    f"输出文件不是有效的 MP4 格式（缺少 ftyp 头）。\n"
+                    f"  文件路径: {output_path}\n"
+                    f"  文件大小: {file_size} bytes\n"
+                    f"  文件头(hex): {header[:16].hex()}\n"
+                    f"  可能原因：\n"
+                    f"    1. FFmpeg mux 失败（codec 不兼容）\n"
+                    f"    2. 模板视频包含 FFmpeg 不支持的编码"
+                )
+            # 检查文件头不全为 0
+            if all(b == 0 for b in header[:16]):
+                return False, (
+                    f"输出文件头部全为 0 字节，写入失败。\n"
+                    f"  文件路径: {output_path}\n"
+                    f"  文件大小: {file_size} bytes"
+                )
+        except OSError as e:
+            return False, f"读取输出文件头失败: {e}"
+
+        return True, ""
 
     def _run_ffmpeg(self, cmd: list, description: str = "", context: dict = None) -> tuple:
         """
@@ -171,7 +322,15 @@ class VideoProcessor:
         divider_mask_path: str = None,
         divider_color: str = "#FFFFFF",
         divider_width: int = 0,
-        process_mode: str = "split"
+        process_mode: str = "split",
+        # ========== 图片 logo 叠加参数 ==========
+        logo_enabled: bool = False,
+        logo_path: str = None,
+        logo_size_percent: int = 20,
+        logo_x_percent: int = 50,
+        logo_y_percent: int = 50,
+        logo_angle: float = 0.0,
+        logo_opacity: float = 1.0
     ) -> ProcessResult:
         """
         处理视频：分割并拼接
@@ -287,8 +446,50 @@ class VideoProcessor:
                 # 检查是否使用曲线蒙版
                 use_mask = divider_mask_path and os.path.exists(divider_mask_path)
 
+                # image_logo 模式：验证 logo 文件
+                if process_mode == "image_logo" and logo_enabled:
+                    if not logo_path:
+                        return ProcessResult(False, error="图片 logo 模式必须提供 logo 图片路径")
+                    if not os.path.exists(logo_path):
+                        return ProcessResult(False, error=f"Logo 图片不存在: {logo_path}")
+                    try:
+                        from .image_utils import get_image_info
+                        logo_info = get_image_info(logo_path)
+                        if not logo_info:
+                            return ProcessResult(False, error=f"Logo 图片格式无效: {logo_path}")
+                        logger.info(
+                            f"使用图片 logo 叠加模式: {os.path.basename(logo_path)} "
+                            f"({logo_info.width}x{logo_info.height}"
+                            f"{', 含透明通道' if logo_info.has_alpha else ''})"
+                        )
+                    except Exception as e:
+                        return ProcessResult(False, error=f"无法读取 logo 图片: {e}")
+
+                # 检查是否使用图片 logo 模式
+                if process_mode == "image_logo":
+                    filter_complex = self._build_image_logo_filter_complex(
+                        out_width, out_height,
+                        logo_path=logo_path,
+                        logo_size_percent=logo_size_percent,
+                        logo_x_percent=logo_x_percent,
+                        logo_y_percent=logo_y_percent,
+                        logo_angle=logo_angle,
+                        logo_opacity=logo_opacity
+                    )
+                    # 修复：image_logo 模式的 _build_image_logo_filter_complex 只返回视频滤镜
+                    # 音频滤镜 [outa] 需要在此追加（否则 -map [outa] 会找不到标签）
+                    # image_logo 模式没有列表视频，list/mix 模式都降级为模板音频
+                    if audio_source == "template" and template_has_audio:
+                        template_vol = float(template_volume) / 100.0
+                        filter_complex = filter_complex + f";[0:a]volume={template_vol}[outa]"
+                    elif audio_source in ("list", "mix") and template_has_audio:
+                        # image_logo 没有列表视频，list/mix 等同于 template
+                        template_vol = float(template_volume) / 100.0
+                        filter_complex = filter_complex + f";[0:a]volume={template_vol}[outa]"
+                    # audio_source == "custom" 由下方 line 525-529 单独处理
+                    # audio_source == "none" 不需要音频滤镜
                 # 检查是否使用视频叠加模式
-                if process_mode == "overlay":
+                elif process_mode == "overlay":
                     logger.info("使用视频叠加模式")
                     filter_complex = self._build_overlay_filter_complex(
                         out_width, out_height,
@@ -360,20 +561,28 @@ class VideoProcessor:
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
 
-            # 验证临时输出路径可写入
-            try:
-                with open(temp_output_path, 'w') as f:
-                    pass
-                os.remove(temp_output_path)
-            except OSError as e:
-                return ProcessResult(False, error=f"无法写入输出路径 {output_dir}: {e}")
+            # 验证输出目录可写入（使用详细诊断版本）
+            output_dir_check = os.path.dirname(os.path.abspath(output_path))
+            ok, diag_msg = self._check_output_writability(output_dir_check)
+            if not ok:
+                logger.error(f"输出目录写权限检查失败: {diag_msg}")
+                return ProcessResult(False, error=diag_msg)
 
             ffmpeg = get_ffmpeg_path()
-            cmd = [
-                ffmpeg, '-y',
-                '-stream_loop', '-1', '-i', template_video,
-                '-stream_loop', '-1', '-i', target_video,
-            ]
+            if process_mode == "image_logo" and logo_enabled:
+                # 图片 logo 模式：[0:v]=主视频(模板), [1:v]=logo 图片
+                # 不需要 target_video（列表视频）
+                cmd = [
+                    ffmpeg, '-y',
+                    '-stream_loop', '-1', '-i', template_video,
+                    '-loop', '1', '-i', logo_path,
+                ]
+            else:
+                cmd = [
+                    ffmpeg, '-y',
+                    '-stream_loop', '-1', '-i', template_video,
+                    '-stream_loop', '-1', '-i', target_video,
+                ]
 
             # 如果使用蒙版，添加蒙版图片作为输入
             if use_mask:
@@ -447,6 +656,11 @@ class VideoProcessor:
 
             if not self._safe_rename(temp_output_path, output_path):
                 return ProcessResult(False, error=f"无法重命名临时文件到目标路径: {output_path}")
+
+            # 验证输出文件（防止 FFmpeg 写出 0 字节或损坏的文件）
+            ok, validation_msg = self._validate_output_file(output_path)
+            if not ok:
+                return ProcessResult(False, error=validation_msg)
 
             # 处理封面
             if cover_type != "none" and success:
@@ -673,6 +887,64 @@ class VideoProcessor:
         if audio_filter:
             return f"{video_filter};{audio_filter}"
         return video_filter
+
+    @staticmethod
+    def _build_image_logo_filter_complex(
+        out_width: int,
+        out_height: int,
+        logo_path: str = "",
+        logo_size_percent: int = 20,
+        logo_x_percent: int = 50,
+        logo_y_percent: int = 50,
+        logo_angle: float = 0.0,
+        logo_opacity: float = 1.0
+    ) -> str:
+        """
+        构建图片 logo 叠加 filter_complex 字符串
+        [1:v] 是 logo 图片输入，[0:v] 是主视频输入
+
+        Args:
+            out_width: 输出视频宽度
+            out_height: 输出视频高度
+            logo_path: logo 图片路径（仅用于错误信息，不影响滤镜构建）
+            logo_size_percent: logo 宽度占视频宽度的百分比 (1-100)
+            logo_x_percent: logo 中心点 X 位置 (0-100%)，0%=左边缘, 100%=右边缘
+            logo_y_percent: logo 中心点 Y 位置 (0-100%)，0%=上边缘, 100%=下边缘
+            logo_angle: 旋转角度（度），0 表示不旋转
+            logo_opacity: 不透明度 (0.0-1.0)
+        """
+        out_width = _make_even(out_width)
+        out_height = _make_even(out_height)
+
+        # 限制参数
+        size_pct = max(1, min(100, int(logo_size_percent)))
+        opacity = max(0.0, min(1.0, float(logo_opacity)))
+        # 旋转角度取模到 0-360，FFmpeg rotate 单位是弧度
+        angle_rad = float(logo_angle) % 360.0 * 3.14159265358979 / 180.0
+        # 透明度极小（接近 0）时直接返回主视频流避免滤镜报错
+        if opacity < 0.001:
+            return "[0:v]copy[outv]"
+
+        # 位置：logo 中心 = (X%, Y%) 视频区域
+        xy = _logo_overlay_xy_from_center(logo_x_percent, logo_y_percent)
+
+        # 旋转：填透明黑，旋转后保持 RGBA
+        # 注意：
+        #   1. FFmpeg 不识别 'transparent' 颜色名
+        #   2. 'fillcolor=0:0:0:0' 会被解析为 4 个独立选项（':' 是滤镜选项分隔符）
+        #   3. 必须用 8 字符十六进制 RGBA：'0x00000000' = R=0,G=0,B=0,A=0（完全透明黑）
+        rotate_filter = f"rotate={angle_rad}:fillcolor=0x00000000"
+
+        # 主滤镜链
+        size_filter = _logo_size_filter(size_pct)
+
+        # 注意：logo 输入编号是 [1:v]（列表视频是 [0:v]）
+        return (
+            f"[1:v]{size_filter},format=rgba,"
+            f"{rotate_filter},"
+            f"colorchannelmixer=aa={opacity:.4f}[logo];"
+            f"[0:v][logo]overlay={xy}:format=auto,format=yuv420p[outv]"
+        )
 
     def _build_alpha_filter_complex(
         self,

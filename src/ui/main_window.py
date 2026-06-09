@@ -28,6 +28,7 @@ from .mixins import (
     DiagramMixin,
     CoverMixin,
     AudioMixin,
+    LogoMixin,
     ProcessingMixin,
 )
 
@@ -38,11 +39,12 @@ class VideoSplitApp(
     DiagramMixin,
     CoverMixin,
     AudioMixin,
+    LogoMixin,
     ProcessingMixin
 ):
-    """视频分割拼接应用 V2.6.2"""
+    """视频分割拼接应用 V2.7.0"""
 
-    VERSION = "2.5.6"
+    VERSION = "2.7.0"
 
     def __init__(self, root):
         self.root = root
@@ -115,6 +117,16 @@ class VideoSplitApp(
         self.divider_width = tk.IntVar(value=2)  # 分界线宽度
         self.divider_curve_points = []  # 曲线控制点列表 [(x1,y1), (x2,y2), ...]
         self._divider_mask_path = None  # 生成的蒙版图片路径
+
+        # ========== 图片 logo 配置 ==========
+        self.logo_enabled = tk.BooleanVar(value=False)
+        self.logo_path = tk.StringVar(value="")
+        self.logo_size_percent = tk.IntVar(value=20)
+        # 中心点位置百分比：默认 50%/50% = 视频中心
+        self.logo_x_percent = tk.IntVar(value=50)
+        self.logo_y_percent = tk.IntVar(value=50)
+        self.logo_angle = tk.DoubleVar(value=0.0)
+        self.logo_opacity = tk.DoubleVar(value=100)
 
         # 输出尺寸配置
         self.output_size_mode = tk.StringVar(value="list")
@@ -350,6 +362,7 @@ class VideoSplitApp(
 
         # --- 处理模式选择 ---
         mode_frame = ttk.Frame(left_frame)
+        self.mode_frame = mode_frame  # 保存引用，供 _on_process_mode_change 使用
         mode_frame.pack(fill=tk.X, pady=2)
         ttk.Label(mode_frame, text="模式:").pack(side=tk.LEFT, padx=3)
         ttk.Radiobutton(
@@ -359,6 +372,10 @@ class VideoSplitApp(
         ttk.Radiobutton(
             mode_frame, text="视频叠加", variable=self.process_mode,
             value="overlay", command=self._on_process_mode_change
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(
+            mode_frame, text="图片logo叠加", variable=self.process_mode,
+            value="image_logo", command=self._on_process_mode_change
         ).pack(side=tk.LEFT, padx=2)
 
         # --- 拼接部分选择（分割拼接模式专用）---
@@ -581,6 +598,9 @@ class VideoSplitApp(
 
         self.split_mode.trace_add('write', lambda *args: self._on_merge_change())
 
+        # --- 图片 logo 叠加设置（图片logo叠加模式专用）---
+        self._create_logo_section(left_frame)
+
     def _create_output_size_section(self, parent):
         """创建输出设置区域"""
         output_size_frame = ttk.LabelFrame(parent, text="输出设置", padding="5")
@@ -681,6 +701,113 @@ class VideoSplitApp(
         ).pack(anchor=tk.W, padx=8, pady=(0, 2))
 
         self._on_output_size_mode_change()
+
+    def _create_logo_section(self, parent):
+        """创建图片 logo 叠加设置控件（嵌入到拼接设置内部，紧跟图片logo叠加单选之后）
+
+        此方法不再创建独立 LabelFrame，所有控件直接打包到父容器（left_frame）中，
+        由 _on_process_mode_change 控制显示/隐藏。
+
+        布局（4 行，grid 对齐）:
+            Row 1: 启用 + 文件路径 + 选择图片 + 预览
+            Row 2: 位置（下拉） + 边距 X / Y + 提示
+            Row 3: 大小（滑块 + 数值 + 单位）
+            Row 4: 角度（数值） + 不透明度（滑块 + 数值）
+        """
+        self.logo_widgets_frame = ttk.Frame(parent)
+        # 默认不显示，由 _on_process_mode_change 在选中 image_logo 模式时显示
+
+        # ========== Row 1: 启用 + 文件选择 + 预览 ==========
+        row1 = ttk.Frame(self.logo_widgets_frame)
+        row1.pack(fill=tk.X, pady=2)
+        ttk.Checkbutton(
+            row1, text="启用 logo 叠加",
+            variable=self.logo_enabled,
+            command=self._on_logo_toggle
+        ).pack(side=tk.LEFT, padx=(3, 6))
+        ttk.Entry(row1, textvariable=self.logo_path).pack(
+            side=tk.LEFT, padx=3, expand=True, fill=tk.X
+        )
+        ttk.Button(row1, text="选择图片", command=self._select_logo_image, width=8).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(row1, text="预览", command=self._refresh_merge_preview, width=6).pack(
+            side=tk.LEFT, padx=3
+        )
+
+        # ========== Row 2: 中心 X (左→右) 滑块 ==========
+        row2 = ttk.Frame(self.logo_widgets_frame)
+        row2.pack(fill=tk.X, pady=2)
+        ttk.Label(row2, text="中心 X (左→右):", width=14).grid(row=0, column=0, sticky='w', padx=(3, 4))
+        x_scale = ttk.Scale(
+            row2, from_=0, to=100, variable=self.logo_x_percent,
+            orient=tk.HORIZONTAL, length=240,
+            command=lambda v: self._on_logo_x_change(v)
+        )
+        x_scale.grid(row=0, column=1, sticky='ew', padx=3)
+        self.logo_x_label = ttk.Label(row2, text="50%", width=5)
+        self.logo_x_label.grid(row=0, column=2, padx=3)
+        ttk.Label(
+            row2, text="(0%=左, 100%=右, 50%=居中)",
+            foreground='#888888', font=('Arial', 8)
+        ).grid(row=0, column=3, sticky='w', padx=(10, 3))
+        row2.columnconfigure(1, weight=1)
+
+        # ========== Row 3: 中心 Y (上→下) 滑块 ==========
+        row3 = ttk.Frame(self.logo_widgets_frame)
+        row3.pack(fill=tk.X, pady=2)
+        ttk.Label(row3, text="中心 Y (上→下):", width=14).grid(row=0, column=0, sticky='w', padx=(3, 4))
+        y_scale = ttk.Scale(
+            row3, from_=0, to=100, variable=self.logo_y_percent,
+            orient=tk.HORIZONTAL, length=240,
+            command=lambda v: self._on_logo_y_change(v)
+        )
+        y_scale.grid(row=0, column=1, sticky='ew', padx=3)
+        self.logo_y_label = ttk.Label(row3, text="50%", width=5)
+        self.logo_y_label.grid(row=0, column=2, padx=3)
+        ttk.Label(
+            row3, text="(0%=上, 100%=下, 50%=居中)",
+            foreground='#888888', font=('Arial', 8)
+        ).grid(row=0, column=3, sticky='w', padx=(10, 3))
+        row3.columnconfigure(1, weight=1)
+
+        # ========== Row 4: 大小 (grid 对齐) ==========
+        row4 = ttk.Frame(self.logo_widgets_frame)
+        row4.pack(fill=tk.X, pady=2)
+        ttk.Label(row4, text="大小:").grid(row=0, column=0, sticky='w', padx=(3, 4))
+        size_scale = ttk.Scale(
+            row4, from_=1, to=100, variable=self.logo_size_percent,
+            orient=tk.HORIZONTAL, length=240,
+            command=lambda v: self._on_logo_size_change(v)
+        )
+        size_scale.grid(row=0, column=1, sticky='ew', padx=3)
+        self.logo_size_label = ttk.Label(row4, text="20%", width=5)
+        self.logo_size_label.grid(row=0, column=2, padx=3)
+        ttk.Label(
+            row4, text="(占视频宽度百分比, 高度等比)",
+            foreground='#888888', font=('Arial', 8)
+        ).grid(row=0, column=3, sticky='w', padx=(10, 3))
+        row4.columnconfigure(1, weight=1)
+
+        # ========== Row 5: 角度 + 不透明度 (grid 对齐) ==========
+        row5 = ttk.Frame(self.logo_widgets_frame)
+        row5.pack(fill=tk.X, pady=2)
+        ttk.Label(row5, text="角度:").grid(row=0, column=0, sticky='w', padx=(3, 4))
+        ttk.Spinbox(
+            row5, from_=0, to=360, width=5, increment=5,
+            textvariable=self.logo_angle
+        ).grid(row=0, column=1, padx=2)
+        ttk.Label(row5, text="°").grid(row=0, column=2, sticky='w', padx=(2, 3))
+        ttk.Label(row5, text="不透明度:").grid(row=0, column=3, sticky='w', padx=(20, 4))
+        opacity_scale = ttk.Scale(
+            row5, from_=0, to=100, variable=self.logo_opacity,
+            orient=tk.HORIZONTAL, length=160,
+            command=lambda v: self._on_logo_opacity_change(v)
+        )
+        opacity_scale.grid(row=0, column=4, sticky='ew', padx=3)
+        self.logo_opacity_label = ttk.Label(row5, text="100%", width=5)
+        self.logo_opacity_label.grid(row=0, column=5, padx=3)
+        row5.columnconfigure(4, weight=1)
 
     def _create_audio_section(self, parent):
         """创建音频设置区域"""
@@ -803,6 +930,9 @@ class VideoSplitApp(
             side=tk.LEFT, padx=3, expand=True, fill=tk.X
         )
         ttk.Button(dir_frame, text="选择", command=self._select_output_dir).pack(side=tk.LEFT, padx=3)
+        ttk.Button(dir_frame, text="测试", command=self._test_output_dir, width=6).pack(side=tk.LEFT, padx=3)
+        ttk.Button(dir_frame, text="用临时目录", command=self._use_temp_output_dir, width=10).pack(side=tk.LEFT, padx=3)
+        ttk.Button(dir_frame, text="打开", command=self._open_output_dir, width=6).pack(side=tk.LEFT, padx=3)
 
         naming_frame = ttk.Frame(output_frame)
         naming_frame.pack(fill=tk.X, pady=2)
@@ -915,12 +1045,19 @@ class VideoSplitApp(
 
     def _on_process_mode_change(self):
         """处理模式切换"""
-        is_split = self.process_mode.get() == "split"
+        mode = self.process_mode.get()
+        is_split = mode == "split"
+        is_image_logo = mode == "image_logo"
         # 显示/隐藏分割拼接相关控件
         if is_split:
             self.split_widgets_frame.pack(fill=tk.X, pady=2, after=self.split_widgets_frame.master.winfo_children()[0])
         else:
             self.split_widgets_frame.pack_forget()
+        # 显示/隐藏图片 logo 设置区（紧跟模式选择之后，位置与 split_widgets_frame 一致）
+        if is_image_logo:
+            self.logo_widgets_frame.pack(fill=tk.X, pady=2, after=self.mode_frame)
+        else:
+            self.logo_widgets_frame.pack_forget()
         self._on_merge_change()
 
     def _on_merge_change(self):
@@ -928,6 +1065,13 @@ class VideoSplitApp(
         # 叠加模式显示固定提示
         if self.process_mode.get() == "overlay":
             self.merge_preview_var.set("叠加模式: 模板视频在前（前景），列表视频在后（背景）")
+            self._draw_merge_preview()
+            return
+        if self.process_mode.get() == "image_logo":
+            if self.logo_enabled.get() and self.logo_path.get():
+                self.merge_preview_var.set(f"Logo叠加模式: 将 Logo 图片叠加到模板视频上")
+            else:
+                self.merge_preview_var.set("Logo叠加模式: 请选择并启用 Logo 图片")
             self._draw_merge_preview()
             return
         # 如果分割模式改变且曲线分界线已启用，重置曲线控制点
@@ -1098,6 +1242,8 @@ class VideoSplitApp(
         """获取所有拼接组合"""
         if self.process_mode.get() == "overlay":
             return ["overlay"]
+        if self.process_mode.get() == "image_logo":
+            return ["image_logo"]
         template_parts = []
         list_parts = []
 

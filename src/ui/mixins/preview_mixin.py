@@ -89,15 +89,101 @@ class PreviewMixin:
                 text="或添加列表视频", fill='#777', font=('Arial', 9)
             )
 
+        # ========== 绘制 logo 预览（仅 image_logo 模式）==========
+        try:
+            if (getattr(self, 'process_mode', None)
+                    and self.process_mode.get() == "image_logo"
+                    and self.logo_enabled.get()
+                    and self.logo_path.get()
+                    and os.path.exists(self.logo_path.get())):
+                if hasattr(self, '_logo_base_frame') and self._logo_base_frame:
+                    self._compose_and_show_logo_preview(w, h)
+        except Exception as e:
+            logger.warning(f"绘制 logo 预览失败: {e}")
+
+    def _compose_and_show_logo_preview(self, canvas_w, canvas_h):
+        """基于视频原始分辨率模拟 FFmpeg 的 logo 叠加，再缩放到画布显示"""
+        canvas = self.merge_preview_canvas
+        canvas.delete("all")
+        base = self._logo_base_frame.copy()
+        video_w, video_h = base.size
+
+        logo_img = Image.open(self.logo_path.get())
+        if logo_img.mode != 'RGBA':
+            logo_img = logo_img.convert('RGBA')
+
+        size_pct = max(1, min(100, self.logo_size_percent.get()))
+        target_w = max(1, int(logo_img.width * size_pct / 100.0))
+        ratio = target_w / max(1, logo_img.width)
+        target_h = max(1, int(logo_img.height * ratio))
+
+        angle = float(self.logo_angle.get())
+        if abs(angle) > 0.01:
+            logo_img = logo_img.rotate(
+                -angle, resample=Image.BICUBIC, expand=True
+            )
+            target_w, target_h = logo_img.size
+
+        opacity = float(self.logo_opacity.get()) / 100.0
+        if opacity < 0.999:
+            alpha = logo_img.split()[3]
+            alpha = alpha.point(lambda p: int(p * opacity))
+            logo_img.putalpha(alpha)
+
+        logo_img = logo_img.resize((target_w, target_h), Image.LANCZOS)
+
+        center_x = video_w * self.logo_x_percent.get() / 100.0
+        center_y = video_h * self.logo_y_percent.get() / 100.0
+        paste_x = int(round(center_x - target_w / 2.0))
+        paste_y = int(round(center_y - target_h / 2.0))
+
+        composite = Image.new('RGBA', base.size, (0, 0, 0, 0))
+        composite.paste(logo_img, (paste_x, paste_y), logo_img)
+        result = Image.alpha_composite(base, composite)
+
+        result.thumbnail((canvas_w - 10, canvas_h - 10), Image.Resampling.LANCZOS)
+        result = result.convert('RGB')
+
+        self.merge_preview_image = result
+        self.merge_preview_photo = ImageTk.PhotoImage(result)
+        canvas.create_image(canvas_w // 2, canvas_h // 2, image=self.merge_preview_photo)
+        self.merge_preview_var.set("预览: 模板视频 + Logo")
+
     def _refresh_merge_preview(self):
         """刷新拼接预览（根据封面类型显示不同内容）"""
         canvas = self.merge_preview_canvas
         canvas_w, canvas_h = 280, 180
 
+        # 模式/状态预检
+        is_image_logo = hasattr(self, 'process_mode') and self.process_mode.get() == "image_logo"
+        logo_enabled = hasattr(self, 'logo_enabled') and self.logo_enabled.get()
+        has_logo_path = hasattr(self, 'logo_path') and bool(self.logo_path.get())
+        logo_file_ok = has_logo_path and os.path.exists(self.logo_path.get()) if has_logo_path else False
+
         template_path = self.template_video.get()
         if not template_path:
             self._draw_merge_preview()
             return
+
+        if is_image_logo and logo_enabled and logo_file_ok:
+            try:
+                temp_dir = get_temp_dir()
+                frame_time = self.global_cover_frame_time.get()
+                template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
+                if not FFmpegHelper.extract_frame(template_path, template_frame_path, frame_time):
+                    raise Exception("无法提取模板帧")
+                template_img = Image.open(template_frame_path).convert("RGBA")
+                self._logo_base_frame = template_img
+                self._compose_and_show_logo_preview(canvas_w, canvas_h)
+                return
+            except Exception as e:
+                logger.warning(f"生成 logo 预览失败: {e}")
+                canvas.delete("all")
+                canvas.create_text(
+                    canvas_w // 2, canvas_h // 2,
+                    text="预览生成失败", fill='#f66', font=('Arial', 10)
+                )
+                return
 
         # 获取当前选中的列表视频
         list_video_path = None
@@ -166,27 +252,6 @@ class PreviewMixin:
                 return
 
             # 其他情况（merged、none、image等）显示拼接预览
-            # 提取模板帧
-            template_frame_path = os.path.join(temp_dir, "preview_template.jpg")
-            if not FFmpegHelper.extract_frame(template_path, template_frame_path, frame_time):
-                raise Exception("无法提取模板帧")
-            template_img = Image.open(template_frame_path)
-
-            # 如果没有列表视频，只显示模板
-            if not list_video_path:
-                template_img.thumbnail((canvas_w - 20, canvas_h - 20), Image.Resampling.LANCZOS)
-                self.merge_preview_image = template_img
-                self.merge_preview_photo = ImageTk.PhotoImage(template_img)
-                self._draw_merge_preview()
-                self.merge_preview_var.set("预览: 模板视频")
-                return
-
-            # 提取列表帧
-            list_frame_path = os.path.join(temp_dir, "preview_list.jpg")
-            if not FFmpegHelper.extract_frame(list_video_path, list_frame_path, frame_time):
-                raise Exception("无法提取列表帧")
-            list_img = Image.open(list_frame_path)
-
             # 模拟拼接
             merged_img = self._simulate_merge(template_img, list_img)
 
